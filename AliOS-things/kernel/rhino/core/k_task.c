@@ -30,7 +30,8 @@ static kstat_t task_create(ktask_t *task, const name_t *name, void *arg,
 
     INTRPT_NESTED_LEVEL_CHK();
 
-    /* idle task is only allowed to create once 如果要创建的任务优先级为RHINO_IDLE_PRI，并且idle task已经创建，则返回 */
+    /* idle task is only allowed to create once */
+    /*  如果要创建的任务优先级为RHINO_IDLE_PRI，并且idle task已经创建，则返回失败 */
     if (prio == RHINO_IDLE_PRI) {
         if (g_idle_task_spawned[cpu_num] > 0u) {
             RHINO_CRITICAL_EXIT();

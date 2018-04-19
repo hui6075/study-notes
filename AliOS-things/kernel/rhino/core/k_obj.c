@@ -25,7 +25,7 @@ idle_count_t g_idle_count[RHINO_CONFIG_CPU_NUM];
 cpu_stack_t  g_idle_task_stack[RHINO_CONFIG_CPU_NUM][RHINO_CONFIG_IDLE_TASK_STACK_SIZE];
 
 /* tick attribute */
-tick_t       g_tick_count;
+tick_t       g_tick_count; /* tick¼ÆÊý */
 klist_t      g_tick_head;
 
 #if (RHINO_CONFIG_SYSTEM_STATS > 0)

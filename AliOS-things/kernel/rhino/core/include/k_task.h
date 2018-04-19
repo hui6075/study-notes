@@ -7,12 +7,12 @@
 
 typedef enum {
     K_SEED,
-    K_RDY,
-    K_PEND,
-    K_SUSPENDED,
-    K_PEND_SUSPENDED,
-    K_SLEEP,
-    K_SLEEP_SUSPENDED,
+    K_RDY, /* 就绪态 */
+    K_PEND, /* 阻塞态 */
+    K_SUSPENDED, /* 挂起态 */
+    K_PEND_SUSPENDED, /* 阻塞状态被挂起 */
+    K_SLEEP, /* 睡眠态 */
+    K_SLEEP_SUSPENDED, /* 睡眠时被挂起 */
     K_DELETED,
 } task_stat_t;
 
@@ -37,35 +37,35 @@ typedef struct {
     suspend_nested_t suspend_count;
 #endif
 
-    struct mutex_s  *mutex_list; /* 互斥锁，优先级翻转 */
+    struct mutex_s  *mutex_list; /* 互斥锁 */
 
 #if (RHINO_CONFIG_SYSTEM_STATS > 0)
     klist_t          task_stats_item;
 #endif
 
-    klist_t          tick_list;
-    tick_t           tick_match;
-    tick_t           tick_remain;
-    klist_t         *tick_head;
+    klist_t          tick_list; /* 定时器链表，按照剩余时间排序 */
+    tick_t           tick_match; /* 超时绝对时间 */
+    tick_t           tick_remain; /* 剩余时间 */
+    klist_t         *tick_head; /* 定时器链表头 */
 
-    void            *msg;
+    void            *msg; /* 消息队列，唤醒策略: 1. 唤醒一个任务; 2. 唤醒所有任务 */
 
 #if (RHINO_CONFIG_BUF_QUEUE > 0)
-    size_t           bq_msg_size;
+    size_t           bq_msg_size; /* BUFFER QUEUE */
 #endif
 
-    task_stat_t      task_state;
-    blk_state_t      blk_state;
+    task_stat_t      task_state; /* 任务状态 */
+    blk_state_t      blk_state; /* 阻塞状态(完成/终止/超时/删除) */
 
     /* Task block on mutex, queue, semphore, event */
     blk_obj_t       *blk_obj; /* 阻塞队列，阻塞策略(FIFO/PRI),阻塞类型*/
 
 #if (RHINO_CONFIG_TASK_SEM > 0)
-    struct sem_s    *task_sem_obj;
+    struct sem_s    *task_sem_obj; /* 信号量 */
 #endif
 
 #if (RHINO_CONFIG_TASK_SCHED_STATS > 0)
-    size_t           task_free_stack_size;
+    size_t           task_free_stack_size; /* 各项统计值 */
     ctx_switch_t     task_ctx_switch_times;
     sys_time_t       task_time_total_run;
     sys_time_t       task_time_total_run_prev;
@@ -83,31 +83,31 @@ typedef struct {
 
 #if (RHINO_CONFIG_SCHED_RR > 0)
     /* for task time slice*/
-    uint32_t         time_slice;
-    uint32_t         time_total;
+    uint32_t         time_slice; /* 运行时的剩余时间片，每个时钟中断时执行一次 */
+    uint32_t         time_total;  /* 进程时间片大小，创建任务时未指定则为10/50 */
 #endif
 
 #if (RHINO_CONFIG_EVENT_FLAG > 0)
-    uint32_t         pend_flags;
-    void            *pend_info;
-    uint8_t          pend_option;
+    uint32_t         pend_flags; /* 等待的事件标志 */
+    void            *pend_info; /* 获取到的事件标志 */
+    uint8_t          pend_option;  /* 获取到事件之后是否清除事件 */
 #endif
 
 #if (RHINO_CONFIG_SCHED_RR > 0)
-    uint8_t          sched_policy;
+    uint8_t          sched_policy; /* 调度策略，FIFO/RR */
 #endif
 
-    uint8_t          cpu_num;
+    uint8_t          cpu_num; /* 运行CPU编号 */
 
 #if (RHINO_CONFIG_CPU_NUM > 1)
-    uint8_t          cpu_binded;
+    uint8_t          cpu_binded; /* CPU绑定 */
     uint8_t          cur_exc;
 #endif
 
     /* current prio */
-    uint8_t          prio;
+    uint8_t          prio; /* 当前优先级。发生优先级翻转时会动态调整优先级 */
     /* base prio */
-    uint8_t          b_prio;
+    uint8_t          b_prio; /* 初始优先级 */
     uint8_t          mm_alloc_flag;
 } ktask_t;
 
