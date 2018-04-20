@@ -47,3 +47,8 @@ skb_queue_head()<br>
 tcp_recvmsg()<br>
 sock_recvmsg()<br>
 recv()
+## AliOS-things
+#### task_and_ipc.vsd
+任务数据结构、状态转换、消息队列RingBuffer、IPC相关
+#### kernel
+内核源码中文注释
