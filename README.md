@@ -52,3 +52,6 @@ recv()
 任务数据结构、状态转换、消息队列RingBuffer、IPC相关
 #### kernel
 内核源码中文注释
+## EMQ
+#### EMQ_source_analyze.doc
+EMQ源码分析
