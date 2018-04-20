@@ -5,14 +5,14 @@
 #ifndef K_QUEUE_H
 #define K_QUEUE_H
 
-#define WAKE_ONE_TASK      0u
-#define WAKE_ALL_TASK      1u
+#define WAKE_ONE_TASK      0u /* 生产vs消费 1 vs 1 */ 
+#define WAKE_ALL_TASK      1u /* 生产vs消费 1 vs all */
 
 typedef struct {
-    void  **queue_start;
-    size_t  size;
-    size_t  cur_num;
-    size_t  peak_num;
+    void  **queue_start; /* 消息队列起始地址 */
+    size_t  size; /* 消息队列容量 */
+    size_t  cur_num; /* 队列当前消息数量 */
+    size_t  peak_num; /* 消息数量峰值 */
 } msg_q_t;
 
 typedef struct {
@@ -21,9 +21,9 @@ typedef struct {
 } msg_info_t;
 
 typedef struct queue_s {
-    blk_obj_t   blk_obj;
-    k_ringbuf_t ringbuf;
-    msg_q_t     msg_q;
+    blk_obj_t   blk_obj; /* 阻塞对象，基类 */
+    k_ringbuf_t ringbuf; /* RingBuffer */
+    msg_q_t     msg_q; /* 消息队列信息 */
 #if (RHINO_CONFIG_SYSTEM_STATS > 0)
     klist_t     queue_item;
 #endif

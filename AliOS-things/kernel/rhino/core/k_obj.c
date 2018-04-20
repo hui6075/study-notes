@@ -7,17 +7,17 @@
 kstat_t      g_sys_stat;
 uint8_t      g_idle_task_spawned[RHINO_CONFIG_CPU_NUM];
 
-runqueue_t   g_ready_queue;
+runqueue_t   g_ready_queue; /* 就绪队列 */
 
 /* schedule lock counter */
-uint8_t      g_sched_lock[RHINO_CONFIG_CPU_NUM];
-uint8_t      g_intrpt_nested_level[RHINO_CONFIG_CPU_NUM];
+uint8_t      g_sched_lock[RHINO_CONFIG_CPU_NUM]; /* 关调度 */
+uint8_t      g_intrpt_nested_level[RHINO_CONFIG_CPU_NUM]; /* 中断嵌套计数 */
 
 /* highest pri task in ready queue */
-ktask_t     *g_preferred_ready_task[RHINO_CONFIG_CPU_NUM];
+ktask_t     *g_preferred_ready_task[RHINO_CONFIG_CPU_NUM]; /* 调度结果 */
 
 /* current active task */
-ktask_t     *g_active_task[RHINO_CONFIG_CPU_NUM];
+ktask_t     *g_active_task[RHINO_CONFIG_CPU_NUM]; /* 当前正在运行的任务 */
 
 /* idle task attribute */
 ktask_t      g_idle_task[RHINO_CONFIG_CPU_NUM];
@@ -26,10 +26,10 @@ cpu_stack_t  g_idle_task_stack[RHINO_CONFIG_CPU_NUM][RHINO_CONFIG_IDLE_TASK_STAC
 
 /* tick attribute */
 tick_t       g_tick_count; /* tick计数 */
-klist_t      g_tick_head;
+klist_t      g_tick_head; /* 睡眠/阻塞任务队列 */
 
 #if (RHINO_CONFIG_SYSTEM_STATS > 0)
-kobj_list_t  g_kobj_list;
+kobj_list_t  g_kobj_list; /* 阻塞任务队列，统计使用 */
 #endif
 
 #if (RHINO_CONFIG_TIMER > 0)

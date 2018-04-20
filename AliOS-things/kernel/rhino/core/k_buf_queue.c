@@ -212,7 +212,7 @@ static kstat_t buf_queue_send(kbuf_queue_t *queue, void *msg, size_t msg_size)
     cur_cpu_num = cpu_cur_get();
     (void)cur_cpu_num;
 
-    if (msg_size > queue->max_msg_size) {
+    if (msg_size > queue->max_msg_size) { /* 发送消息太长 */
         TRACE_BUF_QUEUE_MAX(g_active_task[cur_cpu_num], queue, msg, msg_size);
         RHINO_CRITICAL_EXIT();
         return RHINO_BUF_QUEUE_MSG_SIZE_OVERFLOW;
@@ -238,7 +238,7 @@ static kstat_t buf_queue_send(kbuf_queue_t *queue, void *msg, size_t msg_size)
             return err;
         }
 
-        queue->cur_num++;
+        queue->cur_num++; /* 到此说明RingBuffer没有满，消息也已经存了进去 */
 
         if (queue->peak_num  < queue->cur_num) {
             queue->peak_num  = queue->cur_num;

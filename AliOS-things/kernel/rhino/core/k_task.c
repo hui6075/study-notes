@@ -499,7 +499,7 @@ kstat_t krhino_task_stack_cur_free(ktask_t *task, size_t *free)
 
 #if (RHINO_CONFIG_TASK_PRI_CHG > 0)
 kstat_t task_pri_change(ktask_t *task, uint8_t new_pri)
-{ /* 待调整的任务可能处于就绪态/睡眠态/PEND态 */
+{ /* 待调整优先级的任务可能处于就绪态/睡眠态/PEND态 */
     uint8_t  old_pri;
     kmutex_t *mutex_tmp;
     ktask_t  *mutex_task;
@@ -527,28 +527,28 @@ kstat_t task_pri_change(ktask_t *task, uint8_t new_pri)
                     task = NULL; /* 只调整此任务 */
                     break;
                 case K_PEND:
-                case K_PEND_SUSPENDED: /* 如果持有互斥锁的任务因为其他一些原因被阻塞(等待其他的互斥锁/信号量) */
-                    old_pri    = task->prio;
-                    task->prio = new_pri; /* 首先无条件更新此任务的优先级 */
+                case K_PEND_SUSPENDED: /* 如果待调整任务因为其他一些原因被阻塞(等待其他的互斥锁/信号量) */
+                    old_pri    = task->prio; /* 记录调整前的优先级 */
+                    task->prio = new_pri; /* 首先无条件调整此任务的优先级 */
                     pend_list_reorder(task); /* 然后调整任务在其所在阻塞队列的位置 */
 
                     if (task->blk_obj->obj_type == RHINO_MUTEX_OBJ_TYPE) { /* 如果此任务因为持有其他互斥锁而被阻塞 */
-                        mutex_tmp  = (kmutex_t *)(task->blk_obj); /* 还要再调整其持有的互斥锁阻塞队列上的任务优先级 */
-                        mutex_task = mutex_tmp->mutex_task;
+                        mutex_tmp  = (kmutex_t *)(task->blk_obj); /* 获取此任务等待的互斥锁 */
+                        mutex_task = mutex_tmp->mutex_task; /* 获取当前正持有此互斥锁的任务M */
 
-                        if (mutex_task->prio > task->prio) { /* 如果其他互斥锁持有者的优先级更高 */
+                        if (mutex_task->prio > task->prio) { /* 如果任务M的优先级大于要调整的优先级 */
                             /* since the highest prio of the lock wait task
                             became higher, raise the lock get task prio
                             higher */
-                            task = mutex_task; /* 在下一个循环中调整其优先级 */
-                        } else if (mutex_task->prio == old_pri) {
-                            /* find suitable tcb prio */ /* 找到相同的优先级的任务 */
+                            task = mutex_task; /* 在下一个循环中调整其优先级为要调整的优先级 */
+                        } else if (mutex_task->prio == old_pri) { /* 如果任务M的优先级和当前任务调整前的优先级相同 */
+                            /* find suitable tcb prio */ /* 此分支发生在调低优先级的情况下? */
                             new_pri = mutex_pri_look(mutex_task, 0);
 
                             if (new_pri != mutex_task->prio) {
                                 /* Change prio of lock get task */
                                 task = mutex_task;
-                            } else {
+                            } else { /* 不调整，返回 */
                                 task = NULL;
                             }
                         } else { /* 停止遍历 */

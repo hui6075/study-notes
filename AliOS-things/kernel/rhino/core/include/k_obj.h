@@ -30,10 +30,10 @@ typedef enum {
 } kobj_type_t;
 
 typedef struct blk_obj {
-    klist_t          blk_list;
+    klist_t          blk_list; /* 阻塞在此事件上的任务链表 */
     const name_t    *name;
-    blk_policy_t     blk_policy;
-    kobj_type_t      obj_type;
+    blk_policy_t     blk_policy; /* 任务PEND状态调出策略 */
+    kobj_type_t      obj_type; /* PEND事件类型:信号量/互斥锁/消息队列/事件标志位... */
 } blk_obj_t;
 
 typedef struct {

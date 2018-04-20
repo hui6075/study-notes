@@ -6,12 +6,14 @@
 #define K_CRITICAL_H
 
 #if (RHINO_CONFIG_DISABLE_INTRPT_STATS > 0)
+/* RHINO_CPU_INTRPT_DISABLE通过disable CPSR寄存器中断位来实现关中断 */
 #define RHINO_CRITICAL_ENTER()          \
     do {                                \
         RHINO_CPU_INTRPT_DISABLE();     \
         intrpt_disable_measure_start(); \
     } while (0)
 
+/* RHINO_CPU_INTRPT_ENABLE通过恢复CPSR寄存器来恢复中断状态 */
 #define RHINO_CRITICAL_EXIT()           \
     do {                                \
         intrpt_disable_measure_stop();  \

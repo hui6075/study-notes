@@ -9,7 +9,7 @@ typedef struct {
     blk_obj_t      blk_obj;
     void          *buf;
     k_ringbuf_t    ringbuf;
-    size_t         max_msg_size;
+    size_t         max_msg_size; /* buffer×î´óÈÝÁ¿ */
     size_t         cur_num;
     size_t         peak_num;
     size_t         min_free_buf_size;

@@ -33,18 +33,18 @@ kstat_t mutex_create(kmutex_t *mutex, const name_t *name, uint8_t mm_alloc_flag)
 }
 
 kstat_t krhino_mutex_create(kmutex_t *mutex, const name_t *name)
-{
+{ /* 创建互斥锁 */
     return mutex_create(mutex, name, K_OBJ_STATIC_ALLOC);
 }
 
 static void mutex_release(ktask_t *task, kmutex_t *mutex_rel)
-{
+{ /* 当前任务释放互斥锁(释放完还需要唤醒阻塞在此互斥锁上的其他任务) */
     uint8_t new_pri;
 
     /* find suitable task prio */
     new_pri = mutex_pri_look(task, mutex_rel);
     if (new_pri != task->prio) {
-        /* change prio */
+        /* change prio */ /* 若之前因为优先级翻转问题提升过任务的优先级，此时需要改回默认优先级 */
         task_pri_change(task, new_pri);
 
         TRACE_MUTEX_RELEASE(g_active_task[cpu_cur_get()], task, new_pri);
@@ -53,7 +53,7 @@ static void mutex_release(ktask_t *task, kmutex_t *mutex_rel)
 }
 
 kstat_t krhino_mutex_del(kmutex_t *mutex)
-{
+{ /**/
     CPSR_ALLOC();
 
     klist_t *blk_list_head;
@@ -82,12 +82,12 @@ kstat_t krhino_mutex_del(kmutex_t *mutex)
 
     mutex->blk_obj.obj_type = RHINO_OBJ_TYPE_NONE;
 
-    if (mutex->mutex_task != NULL) {
+    if (mutex->mutex_task != NULL) { /* 释放互斥锁 */
         mutex_release(mutex->mutex_task, mutex);
     }
 
     /* all task blocked on this mutex is waken up */
-    while (!is_klist_empty(blk_list_head)) {
+    while (!is_klist_empty(blk_list_head)) { /* 删除所有阻塞在此互斥锁上的任务 */
         pend_task_rm(krhino_list_entry(blk_list_head->next, ktask_t, task_list));
     }
 
@@ -104,7 +104,7 @@ kstat_t krhino_mutex_del(kmutex_t *mutex)
 
 #if (RHINO_CONFIG_KOBJ_DYN_ALLOC > 0)
 kstat_t krhino_mutex_dyn_create(kmutex_t **mutex, const name_t *name)
-{
+{ /* 动态创建互斥锁 */
     kstat_t  stat;
     kmutex_t *mutex_obj;
 
@@ -131,7 +131,7 @@ kstat_t krhino_mutex_dyn_create(kmutex_t **mutex, const name_t *name)
 }
 
 kstat_t krhino_mutex_dyn_del(kmutex_t *mutex)
-{
+{ /* 动态删除互斥锁 */
     CPSR_ALLOC();
 
     klist_t *blk_list_head;
@@ -184,7 +184,7 @@ kstat_t krhino_mutex_dyn_del(kmutex_t *mutex)
 #endif
 
 uint8_t mutex_pri_limit(ktask_t *task, uint8_t pri)
-{
+{ /* 用户动态修改任务的优先级时调此API获取互斥锁等待队列最大优先级 */
     kmutex_t *mutex_tmp;
     uint8_t  high_pri;
     ktask_t  *first_blk_task;
@@ -236,7 +236,7 @@ uint8_t mutex_pri_look(ktask_t *task, kmutex_t *mutex_rel)
         blk_list_head = &mutex_tmp->blk_obj.blk_list;
         if (!is_klist_empty(blk_list_head)) {
             first_blk_task = krhino_list_entry(blk_list_head->next, ktask_t, task_list);
-            pri = first_blk_task->prio;
+            pri = first_blk_task->prio; /* 找到mutex_tmp阻塞队列的所有任务最高优先级 */
         }
 
         if (new_pri > pri) {
@@ -352,7 +352,7 @@ kstat_t krhino_mutex_lock(kmutex_t *mutex, tick_t ticks)
     RHINO_CPU_INTRPT_DISABLE();
 
     /* so the task is waked up, need know which reason cause wake up */
-    ret = pend_state_end_proc(g_active_task[cpu_cur_get()]);
+    ret = pend_state_end_proc(g_active_task[cpu_cur_get()]); /* 执行到此说明任务被调度了，获取被调度原因并返回给用户 */
 
     RHINO_CPU_INTRPT_ENABLE();
 
@@ -384,7 +384,7 @@ kstat_t krhino_mutex_unlock(kmutex_t *mutex)
 
     cur_cpu_num = cpu_cur_get();
 
-    /* mutex must be released by itself */
+    /* mutex must be released by itself */ /* 只有互斥锁的持有者才能释放互斥锁 */
     if (g_active_task[cur_cpu_num] != mutex->mutex_task) {
         RHINO_CRITICAL_EXIT();
         return RHINO_MUTEX_NOT_RELEASED_BY_OWNER;
@@ -402,7 +402,7 @@ kstat_t krhino_mutex_unlock(kmutex_t *mutex)
     blk_list_head = &mutex->blk_obj.blk_list;
 
     /* if no block task on this list just return */
-    if (is_klist_empty(blk_list_head)) {
+    if (is_klist_empty(blk_list_head)) { /* 如果释放锁时没有任务阻塞在此锁上，直接返回 */
         /* No wait task */
         mutex->mutex_task = NULL;
 
@@ -412,15 +412,15 @@ kstat_t krhino_mutex_unlock(kmutex_t *mutex)
         return RHINO_SUCCESS;
     }
 
-    /* there must have task blocked on this mutex object */
+    /* there must have task blocked on this mutex object */ /* 获取此自旋锁等待队列上的第一个(优先级最高的)任务 */
     task = krhino_list_entry(blk_list_head->next, ktask_t, task_list);
 
     /* wake up the occupy task, which is the highst prio task on the list */
-    pend_task_wakeup(task);
+    pend_task_wakeup(task); /* 唤醒此(优先级最高)的任务 */
 
     TRACE_MUTEX_TASK_WAKE(g_active_task[cur_cpu_num], task, mutex);
 
-    /* change mutex get task */
+    /* change mutex get task */ /* 把自旋锁持有者改为该(优先级最高)的任务 */
     mutex->mutex_task   = task;
     mutex->mutex_list   = task->mutex_list;
     task->mutex_list    = mutex;

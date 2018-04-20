@@ -18,7 +18,7 @@ kstat_t ringbuf_init(k_ringbuf_t *p_ringbuf, void *buf, size_t len, size_t type,
 
 }
 static size_t ringbuf_headlen_compress(size_t head_len, uint8_t *cmp_buf)
-{
+{ /* 把四个字节的消息长度压缩成1-3个字节 */
     size_t   len_bytes = 0;
     uint8_t *p_len   = NULL;
     uint32_t be_len  = 0;
@@ -38,7 +38,7 @@ static size_t ringbuf_headlen_compress(size_t head_len, uint8_t *cmp_buf)
         cmp_buf[2] = p_len[3];
     }
 
-    return len_bytes;
+    return len_bytes; /* (1,3] */
 }
 
 static size_t ringbuf_headlen_decompress(size_t buf_len, uint8_t *cmp_buf)
@@ -73,17 +73,17 @@ kstat_t ringbuf_push(k_ringbuf_t *p_ringbuf, void *data, size_t len)
             p_ringbuf->tail = p_ringbuf->buf;
         }
 
-        memcpy(p_ringbuf->tail, data, p_ringbuf->blk_size);
+        memcpy(p_ringbuf->tail, data, p_ringbuf->blk_size); /* 把固定长度的消息copy到Ring Buffer */
         p_ringbuf->tail     += p_ringbuf->blk_size;
         p_ringbuf->freesize -= p_ringbuf->blk_size;
     } else {
         len_bytes = ringbuf_headlen_compress(len, c_len);
         if (len_bytes == 0 || len_bytes > RINGBUF_LEN_MAX_SIZE ) {
-            return RHINO_INV_PARAM;
+            return RHINO_INV_PARAM; /* len_bytes: (1,3] */
         }
 
         /* for dynamic length ringbuf */
-        if (p_ringbuf->freesize < len_bytes + len ) {
+        if (p_ringbuf->freesize < len_bytes + len ) { /* 消息长度+消息本身 */
             return RHINO_RINGBUF_FULL;
         }
 
@@ -94,16 +94,16 @@ kstat_t ringbuf_push(k_ringbuf_t *p_ringbuf, void *data, size_t len)
         /* copy length data to buffer */
         if (p_ringbuf->tail >= p_ringbuf->head &&
             (split_len = p_ringbuf->end - p_ringbuf->tail) < len_bytes && split_len > 0) {
-            memcpy(p_ringbuf->tail, &c_len[0], split_len);
+            memcpy(p_ringbuf->tail, &c_len[0], split_len); /* 把消息长度写到队列中 */
             len_bytes -= split_len;
             p_ringbuf->tail =  p_ringbuf->buf;
-            p_ringbuf->freesize -= split_len;
+            p_ringbuf->freesize -= split_len; /* 调整RingBuffer剩余空间 */
         } else {
-            split_len = 0;
+            split_len = 0; /* split_len表示消息拷贝是否要从头开始 */
         }
 
-        if (len_bytes > 0) {
-            memcpy(p_ringbuf->tail, &c_len[split_len], len_bytes);
+        if (len_bytes > 0) { /* 写到Ring尾调整? */
+            memcpy(p_ringbuf->tail, &c_len[split_len], len_bytes); /* c_len[]是长度数组 */
             p_ringbuf->freesize -= len_bytes;
             p_ringbuf->tail += len_bytes;
         }
@@ -125,7 +125,7 @@ kstat_t ringbuf_push(k_ringbuf_t *p_ringbuf, void *data, size_t len)
             p_ringbuf->freesize -= split_len;
         }
 
-        memcpy(p_ringbuf->tail, data, len);
+        memcpy(p_ringbuf->tail, data, len); /* 把消息payload拷贝到RingBuffer中 */
         p_ringbuf->tail += len;
         p_ringbuf->freesize -= len;
     }
@@ -141,40 +141,40 @@ kstat_t ringbuf_pop(k_ringbuf_t *p_ringbuf, void *pdata, size_t *plen)
     uint8_t  c_len[RINGBUF_LEN_MAX_SIZE] = {0};
     size_t   len_bytes = 0;
 
-    if (ringbuf_is_empty(p_ringbuf)) {
+    if (ringbuf_is_empty(p_ringbuf)) { /* Ring Buffer为空，返回失败 */
         return RHINO_RINGBUF_EMPTY;
     }
 
-    if (p_ringbuf->type == RINGBUF_TYPE_FIX) {
+    if (p_ringbuf->type == RINGBUF_TYPE_FIX) { /* Ring Buffer长度固定的情况下 */
         if (p_ringbuf->head == p_ringbuf->end) {
             p_ringbuf->head = p_ringbuf->buf;
         }
 
-        memcpy(pdata, p_ringbuf->head, p_ringbuf->blk_size);
+        memcpy(pdata, p_ringbuf->head, p_ringbuf->blk_size); /* 把由head开始、长度为blk_size的消息copy给pdata指向的内存 */
         p_ringbuf->head += p_ringbuf->blk_size;
-        p_ringbuf->freesize += p_ringbuf->blk_size;
+        p_ringbuf->freesize += p_ringbuf->blk_size; /* 消息弹出以后，空闲字节数增加相应的字节 */
 
         if (plen != NULL) {
             *plen = p_ringbuf->blk_size;
         }
 
         return RHINO_SUCCESS;
-    } else {
+    } else { /* Ring Buffer长度动态变化的情况下 */
         if (p_ringbuf->head == p_ringbuf->end) {
             p_ringbuf->head = p_ringbuf->buf;
         }
 
         /*decode length */
         if ((*p_ringbuf->head & RINGBUF_LEN_MASK_ONEBIT) == 0 ) {
-            /*length use one byte*/
+            /*length use one byte*/ /* bit8 == 0 */
             len_bytes = 1;
         } else if ((*p_ringbuf->head & RINGBUF_LEN_MASK_TWOBIT) ==
                    RINGBUF_LEN_VLE_2BYTES) {
-            /*length use 2 bytes*/
+            /*length use 2 bytes*/ /* bit8 == 1, bit7 == 0 */
             len_bytes = 2;
         } else if ((*p_ringbuf->head & RINGBUF_LEN_MASK_TWOBIT) ==
                    RINGBUF_LEN_VLE_3BYTES) {
-            /*length use 3 bytes*/
+            /*length use 3 bytes*/ /* bit8 == 1, bit7 == 1 */
             len_bytes = 3;
         } else {
             return RHINO_INV_PARAM;

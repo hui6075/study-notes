@@ -9,7 +9,7 @@ typedef struct mutex_s {
     blk_obj_t       blk_obj;
     ktask_t        *mutex_task; /* mutex owner task */
     struct mutex_s *mutex_list; /* task mutex list */
-    mutex_nested_t  owner_nested; /* 嵌套互斥锁计数 */
+    mutex_nested_t  owner_nested; /* 同一个任务嵌套占有互斥锁计数 */
 
 #if (RHINO_CONFIG_SYSTEM_STATS > 0)
     klist_t         mutex_item;
