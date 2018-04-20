@@ -33,8 +33,8 @@
 typedef struct {
     uint8_t *buf; /* Ring Buffer起始地址 */
     uint8_t *end; /* Ring Buffer结束地址 */
-    uint8_t *head; /* 消息起始地址 */
-    uint8_t *tail; /* 消息结束地址 */
+    uint8_t *head; /* 队列第一条消息起始地址 */
+    uint8_t *tail; /* 队列最后一条消息结束地址 */
     size_t   freesize; /* Ring Buffer空闲字节数 */
     size_t   type; /* 每条消息固定长度/可变长度 */
     size_t   blk_size; /* 消息长度 */

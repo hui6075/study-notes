@@ -36,7 +36,7 @@ static size_t ringbuf_headlen_compress(size_t head_len, uint8_t *cmp_buf)
         cmp_buf[0] = RINGBUF_LEN_VLE_3BYTES | p_len[1];
         cmp_buf[1] = p_len[2];
         cmp_buf[2] = p_len[3];
-    }
+    } /* 填充完之后, 0表示1个字节, 10表示2个字节, 11表示3个字节 */
 
     return len_bytes; /* (1,3] */
 }
@@ -49,7 +49,7 @@ static size_t ringbuf_headlen_decompress(size_t buf_len, uint8_t *cmp_buf)
 
     memcpy(&len_buf[sizeof(uint32_t) - buf_len], cmp_buf, buf_len);
 
-    if (buf_len > 1) {
+    if (buf_len > 1) { /* 解压头部长度 */
         len_buf[sizeof(uint32_t) - buf_len] &= RINGBUF_LEN_MASK_CLEAN_TWOBIT;
     }
 
@@ -77,7 +77,7 @@ kstat_t ringbuf_push(k_ringbuf_t *p_ringbuf, void *data, size_t len)
         p_ringbuf->tail     += p_ringbuf->blk_size;
         p_ringbuf->freesize -= p_ringbuf->blk_size;
     } else {
-        len_bytes = ringbuf_headlen_compress(len, c_len);
+        len_bytes = ringbuf_headlen_compress(len, c_len);  
         if (len_bytes == 0 || len_bytes > RINGBUF_LEN_MAX_SIZE ) {
             return RHINO_INV_PARAM; /* len_bytes: (1,3] */
         }

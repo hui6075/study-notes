@@ -9,10 +9,10 @@ typedef struct {
     blk_obj_t      blk_obj;
     void          *buf;
     k_ringbuf_t    ringbuf;
-    size_t         max_msg_size; /* buffer最大容量 */
-    size_t         cur_num;
-    size_t         peak_num;
-    size_t         min_free_buf_size;
+    size_t         max_msg_size; /* 消息最大长度 */
+    size_t         cur_num; /* 当前队列中消息条数 */
+    size_t         peak_num; /* 消息数量峰值 */
+    size_t         min_free_buf_size; /* 消息队列可用内存低谷 */
 #if (RHINO_CONFIG_SYSTEM_STATS > 0)
     klist_t        buf_queue_item;
 #endif

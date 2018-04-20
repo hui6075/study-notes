@@ -31,7 +31,7 @@ RHINO_INLINE void tick_list_pri_insert(klist_t *head, ktask_t *task)
 }
 
 void tick_list_insert(ktask_t *task, tick_t time)
-{
+{ /* 可能被带超时的API所调用 */
     klist_t *tick_head_ptr;
 
     if (time > 0u) {

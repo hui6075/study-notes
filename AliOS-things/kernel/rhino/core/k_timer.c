@@ -60,10 +60,10 @@ static kstat_t timer_create(ktimer_t *timer, const name_t *name, timer_cb_t cb,
     }
 
     timer->name          = name;
-    timer->cb            = cb;
-    timer->init_count    = first;
-    timer->round_ticks   = round;
-    timer->remain        = 0u;
+    timer->cb            = cb; /* 回调函数 */
+    timer->init_count    = first; /* 第一次时间 */
+    timer->round_ticks   = round; /* 任务执行周期, 0表示只执行一次 */
+    timer->remain        = 0u; /* 定时器剩余时间 */
     timer->match         = 0u;
     timer->timer_state   = TIMER_DEACTIVE;
     timer->to_head       = NULL;
@@ -73,7 +73,7 @@ static kstat_t timer_create(ktimer_t *timer, const name_t *name, timer_cb_t cb,
 
     timer->obj_type = RHINO_TIMER_OBJ_TYPE;
 
-    if (auto_run > 0u) {
+    if (auto_run > 0u) { /* 自带开始的话 */
         err = krhino_timer_start(timer);
     }
 
@@ -152,8 +152,8 @@ kstat_t krhino_timer_start(ktimer_t *timer)
     NULL_PARA_CHK(timer);
 
     cb.timer  = timer;
-    cb.cb_num = TIMER_CMD_START;
-    err = krhino_buf_queue_send(&g_timer_queue, &cb, sizeof(k_timer_queue_cb));
+    cb.cb_num = TIMER_CMD_START; /* 消息会拷贝给接收任务，所以无需担心cb的作用域 */
+    err = krhino_buf_queue_send(&g_timer_queue, &cb, sizeof(k_timer_queue_cb)); /* g_timer_queue由系统任务来消费 */
     return err;
 }
 
@@ -238,13 +238,13 @@ static void timer_cb_proc(void)
 
     for (q = start->next; q != end; q = q->next) {
         timer = krhino_list_entry(q, ktimer_t, timer_list);
-        delta = (sys_time_i_t)timer->match - (sys_time_i_t)g_timer_count;
-
+        delta = (sys_time_i_t)timer->match - (sys_time_i_t)g_timer_count; /* delta有可能小于0 */
+                                                                                                                     /* 比如某个时钟周期没有执行完当前定时器 */
         if (delta <= 0) {
-            timer->cb(timer, timer->timer_cb_arg);
+            timer->cb(timer, timer->timer_cb_arg); /* 执行定时器中的回调函数 */
             timer_list_rm(timer);
 
-            if (timer->round_ticks > 0u) {
+            if (timer->round_ticks > 0u) { /* 如果是周期性任务, 还需要重新调整剩余时间并加入定时器链表 */
                 timer->remain  =  timer->round_ticks;
                 timer->match   =  g_timer_count + timer->remain;
                 timer->to_head = &g_timer_head;
@@ -265,7 +265,7 @@ static void cmd_proc(k_timer_queue_cb *cb, uint8_t cmd)
     timer = cb->timer;
 
     switch (cmd) {
-        case TIMER_CMD_START:
+        case TIMER_CMD_START: /* 新定时器 */
             if (timer->obj_type != RHINO_TIMER_OBJ_TYPE) {  
                 break;
             }
@@ -279,10 +279,10 @@ static void cmd_proc(k_timer_queue_cb *cb, uint8_t cmd)
             timer->remain  =  timer->init_count;
             /* used by timer delete */
             timer->to_head = &g_timer_head;
-            timer_list_pri_insert(&g_timer_head, timer);
-            timer->timer_state = TIMER_ACTIVE; 
+            timer_list_pri_insert(&g_timer_head, timer); /* 按照剩余时间插入定时器队列 */
+            timer->timer_state = TIMER_ACTIVE; /* 激活 */
             break;
-        case TIMER_CMD_STOP:
+        case TIMER_CMD_STOP: /* 终止定时器 */
             if (timer->obj_type != RHINO_TIMER_OBJ_TYPE) {
                 break;
             }
@@ -290,10 +290,10 @@ static void cmd_proc(k_timer_queue_cb *cb, uint8_t cmd)
             if (timer->timer_state == TIMER_DEACTIVE) {
                 break;
             }
-            timer_list_rm(timer);
+            timer_list_rm(timer); /* 把定时器从定时器链表中删除 */
             timer->timer_state = TIMER_DEACTIVE;
             break;
-        case TIMER_CMD_CHG:
+        case TIMER_CMD_CHG: /* 更改定时器周期 */
             if (cb->first == 0u) {
                 break;
             }
@@ -309,7 +309,7 @@ static void cmd_proc(k_timer_queue_cb *cb, uint8_t cmd)
             timer->init_count  = cb->first;
             timer->round_ticks = cb->u.round;
             break;
-        case TIMER_ARG_CHG:
+        case TIMER_ARG_CHG: /* 更改定时器回调参数 */
             if (timer->obj_type != RHINO_TIMER_OBJ_TYPE) {
                 break;
             }
@@ -320,7 +320,7 @@ static void cmd_proc(k_timer_queue_cb *cb, uint8_t cmd)
 
             timer->timer_cb_arg = cb->u.arg;
             break;
-        case TIMER_CMD_DEL:
+        case TIMER_CMD_DEL: /* 删除定时器 */
             if (timer->obj_type != RHINO_TIMER_OBJ_TYPE) {
                 break;               
             }
@@ -369,13 +369,13 @@ static void timer_cmd_proc(k_timer_queue_cb *cb)
         cmd_proc(cb, TIMER_ARG_CHG);
         cmd_proc(cb, TIMER_CMD_START);
     }
-    else {
+    else { /* 新建的定时器, cb_num == TIMER_CMD_START */
         cmd_proc(cb, cb->cb_num);
     }
 }
 
 static void timer_task(void *pa)
-{
+{ /* 定时器任务(类似Linux内核线程) */
     ktimer_t         *timer;
     k_timer_queue_cb  cb_msg;
     kstat_t           err;
@@ -385,7 +385,7 @@ static void timer_task(void *pa)
     size_t            msg_size;
     (void)pa;
 
-    while (RHINO_TRUE) {
+    while (RHINO_TRUE) { /* 如果g_timer_queue中没有消息, timer_task会被阻塞 */
         err = krhino_buf_queue_recv(&g_timer_queue, RHINO_WAIT_FOREVER, &cb_msg, &msg_size);
         tick_end   = krhino_sys_tick_get();
 
@@ -396,14 +396,14 @@ static void timer_task(void *pa)
             k_err_proc(RHINO_SYS_FATAL_ERR);
         }
 
-        timer_cmd_proc(&cb_msg);
-
-        while (!is_klist_empty(&g_timer_head)) {
+        timer_cmd_proc(&cb_msg); /* 消费定时器消息,把新的ktimer_t加入g_timer_head链表 */
+                                                        /* 把更改的定时器做相应的处理 */
+        while (!is_klist_empty(&g_timer_head)) { /* 如果定时器都被停止了，链表就空了 */
             timer = krhino_list_entry(g_timer_head.next, ktimer_t, timer_list);
             tick_start = krhino_sys_tick_get();
             delta = (sys_time_i_t)timer->match - (sys_time_i_t)tick_start;
-            if (delta > 0) {
-                err = krhino_buf_queue_recv(&g_timer_queue, (tick_t)delta, &cb_msg, &msg_size);
+            if (delta > 0) { /* 以最近一个定时事件剩余时间为超时时间去读取定时器队列 */
+                err = krhino_buf_queue_recv(&g_timer_queue, (tick_t)delta, &cb_msg, &msg_size); 
                 tick_end = krhino_sys_tick_get();
                 if (err == RHINO_BLK_TIMEOUT) {
                     g_timer_count = tick_end;

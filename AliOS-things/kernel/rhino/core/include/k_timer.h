@@ -22,21 +22,21 @@ typedef struct {
     klist_t       timer_list;
     klist_t      *to_head;
     const name_t *name;
-    timer_cb_t    cb;
-    void         *timer_cb_arg;
+    timer_cb_t    cb; /* 回调任务 */
+    void         *timer_cb_arg; /* 回调参数 */
     sys_time_t    match;
-    sys_time_t    remain;
-    sys_time_t    init_count;
-    sys_time_t    round_ticks;
+    sys_time_t    remain; /* 定时器剩余时间 */
+    sys_time_t    init_count; /* 第一次执行时间相对值 */
+    sys_time_t    round_ticks; /* 周期, 0表示只执行一次 */
     void         *priv;
     kobj_type_t   obj_type;
-    uint8_t       timer_state;
+    uint8_t       timer_state; /* 激活/未激活 */
     uint8_t       mm_alloc_flag;
 } ktimer_t;
 
 typedef struct {
-    ktimer_t  *timer;
-    uint8_t    cb_num;
+    ktimer_t  *timer; /* 指向上面的ktimer_t */
+    uint8_t    cb_num; /* TIMER_CMD_START/CMD_STOP/CMD_CHG/ARG_CHG/CMD_DEL... */
     sys_time_t first;
     union {
         sys_time_t round;

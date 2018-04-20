@@ -226,39 +226,39 @@ static kstat_t buf_queue_send(kbuf_queue_t *queue, void *msg, size_t msg_size)
     head = &queue->blk_obj.blk_list;
 
     /* buf queue is not full here, if there is no blocked receive task */
-    if (is_klist_empty(head)) {
+    if (is_klist_empty(head)) { /* 没有读任务阻塞在此消息队列 */
 
-        err = ringbuf_push(&(queue->ringbuf), msg, msg_size);
+        err = ringbuf_push(&(queue->ringbuf), msg, msg_size); /* 把消息塞进消息队列尾部 */
 
-        if (err != RHINO_SUCCESS) {
+        if (err != RHINO_SUCCESS) { /* 失败(消息队列容量不足) */
             RHINO_CRITICAL_EXIT();
             if (err == RHINO_RINGBUF_FULL) {
                 err =  RHINO_BUF_QUEUE_FULL;
             }
-            return err;
+            return err; /* 返回 */
         }
 
         queue->cur_num++; /* 到此说明RingBuffer没有满，消息也已经存了进去 */
 
         if (queue->peak_num  < queue->cur_num) {
-            queue->peak_num  = queue->cur_num;
+            queue->peak_num  = queue->cur_num; /* 更新消息数量峰值 */
         }
 
         if (queue->min_free_buf_size > queue->ringbuf.freesize) {
-            queue->min_free_buf_size = queue->ringbuf.freesize;
+            queue->min_free_buf_size = queue->ringbuf.freesize; /* 更新Ring Buffer内存低谷值 */
         }
 
         TRACE_BUF_QUEUE_POST(g_active_task[cur_cpu_num], queue, msg, msg_size);
 
         RHINO_CRITICAL_EXIT();
-        return RHINO_SUCCESS;
+        return RHINO_SUCCESS; /* 返回 */
     }
 
-    task = krhino_list_entry(head->next, ktask_t, task_list);
-    memcpy(task->msg, msg, msg_size);
-    task->bq_msg_size = msg_size;
+    task = krhino_list_entry(head->next, ktask_t, task_list); /* 有任务阻塞在此消息队列 */
+    memcpy(task->msg, msg, msg_size); /* 直接把消息拷贝给该任务 */
+    task->bq_msg_size = msg_size; /* 把消息长度告诉该任务 */
 
-    pend_task_wakeup(task);
+    pend_task_wakeup(task); /* 唤醒该任务 */
 
     TRACE_BUF_QUEUE_TASK_WAKE(g_active_task[cur_cpu_num], task, queue);
 
@@ -301,14 +301,14 @@ kstat_t krhino_buf_queue_recv(kbuf_queue_t *queue, tick_t ticks, void *msg,
         return RHINO_KOBJ_TYPE_ERR;
     }
 
-    if (!ringbuf_is_empty(&(queue->ringbuf))) {
-        ringbuf_pop(&(queue->ringbuf), msg, size);
+    if (!ringbuf_is_empty(&(queue->ringbuf))) { /* 队列中有消息 */
+        ringbuf_pop(&(queue->ringbuf), msg, size); /* 把消息直接拷贝给用户 */
         queue->cur_num --;
         RHINO_CRITICAL_EXIT();
-        return RHINO_SUCCESS;
+        return RHINO_SUCCESS; /* 然后返回 */
     }
 
-    if (ticks == RHINO_NO_WAIT) {
+    if (ticks == RHINO_NO_WAIT) { /* 队列中没有消息，任务也不愿意阻塞，直接返回 */
         *size = 0u;
         RHINO_CRITICAL_EXIT();
         return RHINO_NO_PEND_WAIT;
@@ -319,23 +319,23 @@ kstat_t krhino_buf_queue_recv(kbuf_queue_t *queue, tick_t ticks, void *msg,
         RHINO_CRITICAL_EXIT();
         return RHINO_SCHED_DISABLE;
     }
-
-    g_active_task[cur_cpu_num]->msg = msg;
+    /* 消费者任务自带缓冲区，如果被阻塞了只需将来把消息拷贝给任务即可 */
+    g_active_task[cur_cpu_num]->msg = msg; /* 把将来要接受消息的内存地址挂到任务的msg字段 */
     pend_to_blk_obj((blk_obj_t *)queue, g_active_task[cur_cpu_num], ticks);
 
     TRACE_BUF_QUEUE_GET_BLK(g_active_task[cur_cpu_num], queue, ticks);
 
-    RHINO_CRITICAL_EXIT_SCHED();
+    RHINO_CRITICAL_EXIT_SCHED(); /* 任务切换... */
 
     RHINO_CPU_INTRPT_DISABLE();
 
     cur_cpu_num = cpu_cur_get();
 
-    ret = pend_state_end_proc(g_active_task[cur_cpu_num]);
+    ret = pend_state_end_proc(g_active_task[cur_cpu_num]); /* 任务再次被调度，获取被调度原因 */
 
     switch (ret) {
         case RHINO_SUCCESS:
-            *size = g_active_task[cur_cpu_num]->bq_msg_size;
+            *size = g_active_task[cur_cpu_num]->bq_msg_size; /* 若是因为消息到达而被唤醒，告诉任务消息长度 */
             break;
 
         default:
@@ -349,7 +349,7 @@ kstat_t krhino_buf_queue_recv(kbuf_queue_t *queue, tick_t ticks, void *msg,
 }
 
 kstat_t krhino_buf_queue_flush(kbuf_queue_t *queue)
-{
+{ /* 清空消息 */
     CPSR_ALLOC();
 
     NULL_PARA_CHK(queue);
@@ -374,7 +374,7 @@ kstat_t krhino_buf_queue_flush(kbuf_queue_t *queue)
 }
 
 kstat_t krhino_buf_queue_info_get(kbuf_queue_t *queue, kbuf_queue_info_t *info)
-{
+{ /* 获取队列信息 */
     CPSR_ALLOC();
 
     NULL_PARA_CHK(queue);
