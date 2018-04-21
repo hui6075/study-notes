@@ -81,7 +81,7 @@ RHINO_INLINE k_mm_list_t *init_mm_region(void *regionaddr, size_t len)
     /*first mmblk for region info*/
     firstblk = (k_mm_list_t *) regionaddr;
     firstblk->prev  = NULL;
-    firstblk->buf_size = MM_ALIGN_UP(sizeof(k_mm_region_info_t))
+    firstblk->buf_size = MM_ALIGN_UP(sizeof(k_mm_region_info_t)) /* 8 */
                        | RHINO_MM_ALLOCED | RHINO_MM_PREVALLOCED;
 #if (RHINO_CONFIG_MM_DEBUG > 0u)
     firstblk->dye   = RHINO_MM_CORRUPT_DYE;
@@ -115,7 +115,7 @@ RHINO_INLINE k_mm_list_t *init_mm_region(void *regionaddr, size_t len)
 
 /* 2^(N + MM_MIN_BIT) <= size < 2^(1 + N + MM_MIN_BIT) */
 static int32_t size_to_level(size_t size)
-{
+{ /* 返回size对应的级数 */
     size_t cnt;
     cnt = 32 - krhino_clz32(size);
     if ( cnt < MM_MIN_BIT )
@@ -171,7 +171,7 @@ static void removesize(k_mm_head *mmhead, size_t size)
 #endif
 
 kstat_t krhino_init_mm_head(k_mm_head **ppmmhead, void *addr, size_t len )
-{
+{                                                                    /* &g_kmm_head, g_mm_region[0].start, g_mm_region[0].len */
     k_mm_list_t *nextblk;
     k_mm_list_t *firstblk;
     k_mm_head   *pmmhead;
@@ -191,13 +191,13 @@ kstat_t krhino_init_mm_head(k_mm_head **ppmmhead, void *addr, size_t len )
       2.  and also ast least have 1k for user alloced
     */
     orig_addr = addr;
-    addr = (void *) MM_ALIGN_UP((size_t)addr);
+    addr = (void *) MM_ALIGN_UP((size_t)addr); /* 起始地址8字节向上对齐 */
     len -= (size_t)addr - (size_t)orig_addr;
-    len = MM_ALIGN_DOWN(len);
+    len = MM_ALIGN_DOWN(len); /* 总长度8字节向下对齐 */
 
     if ( len == 0
          || len < MIN_FREE_MEMORY_SIZE + RHINO_CONFIG_MM_TLF_BLK_SIZE
-         || len > MM_MAX_SIZE) {
+         || len > MM_MAX_SIZE) { /* [1k+xk, 16M] */
         return RHINO_MM_POOL_SIZE_ERR;
     }
 
@@ -211,8 +211,8 @@ kstat_t krhino_init_mm_head(k_mm_head **ppmmhead, void *addr, size_t len )
 
     MM_CRITICAL_ENTER(&(pmmhead->mm_mutex));
 
-    firstblk = init_mm_region((void *)((size_t)addr + MM_ALIGN_UP(sizeof(k_mm_head))),
-                              MM_ALIGN_DOWN(len - sizeof(k_mm_head)));
+    firstblk = init_mm_region((void *)((size_t)addr + MM_ALIGN_UP(sizeof(k_mm_head))), /* 第一个可分配字节地址 */
+                              MM_ALIGN_DOWN(len - sizeof(k_mm_head))); /* 可分配字节总数 */
 
 
     pmmhead->regioninfo = (k_mm_region_info_t *)firstblk->mbinfo.buffer;
@@ -387,7 +387,7 @@ static void k_mm_freelist_insert(k_mm_head *mmhead, k_mm_list_t *blk)
 
 /* get blk from freelist[level], and clear freebitmap if needed */
 static void k_mm_freelist_delete(k_mm_head *mmhead, k_mm_list_t *blk)
-{
+{ /* 把block从其链表中删除 */
     int32_t level;
 
     level = size_to_level(MM_GET_BUF_SIZE(blk));
@@ -407,8 +407,8 @@ static void k_mm_freelist_delete(k_mm_head *mmhead, k_mm_list_t *blk)
         /* first blk in this freelist */
         mmhead->freelist[level] = blk->mbinfo.free_ptr.next;
         if (mmhead->freelist[level] == NULL) {
-            /* freelist null, so clear the bit  */
-            mmhead->free_bitmap &= (~(1<<level));
+            /* freelist null, so clear the bit  */ /* 这个大小的k_mm_list_t链表已经没有元素了 */
+            mmhead->free_bitmap &= (~(1<<level)); /* 将此大小的blk 位图清零 */
         }
     }
     
@@ -473,13 +473,13 @@ void *k_mm_alloc(k_mm_head *mmhead, size_t size)
     retptr = NULL;
 
     size = MM_ALIGN_UP(size);
-    size = size < MM_MIN_SIZE ? MM_MIN_SIZE : size;
+    size = size < MM_MIN_SIZE ? MM_MIN_SIZE : size; /* 最小单位32字节 */
     
     if ((level = size_to_level(size)) == -1) {
         goto ALLOCEXIT;
     }
 
-    /* try to find in higher level */
+    /* try to find in higher level */ /* 找更高level的 k_mm_list_t*/
     get_b = find_up_level(mmhead, level);
     if (get_b == NULL) {
         /* try to find in same level */
@@ -505,19 +505,19 @@ void *k_mm_alloc(k_mm_head *mmhead, size_t size)
 
     /* Should the block be split? */
     if (MM_GET_BUF_SIZE(get_b) >= size + MMLIST_HEAD_SIZE + MM_MIN_SIZE) {
-        left_size = MM_GET_BUF_SIZE(get_b) - size - MMLIST_HEAD_SIZE;
+        left_size = MM_GET_BUF_SIZE(get_b) - size - MMLIST_HEAD_SIZE; /* 剩余空间大于32，还可以再形成一个blk */
         
-        get_b->buf_size = size | (get_b->buf_size & RHINO_MM_PRESTAT_MASK);
+        get_b->buf_size = size | (get_b->buf_size & RHINO_MM_PRESTAT_MASK); /* 保持前一个block的状态 */
         new_b = MM_GET_NEXT_BLK(get_b);
         
         new_b->prev = get_b;
-        new_b->buf_size = left_size | RHINO_MM_FREE | RHINO_MM_PREVALLOCED;
+        new_b->buf_size = left_size | RHINO_MM_FREE | RHINO_MM_PREVALLOCED; /* 指示前一个block已分配 */
 #if (RHINO_CONFIG_MM_DEBUG > 0u)
         new_b->dye   = RHINO_MM_FREE_DYE;
         new_b->owner = 0;
 #endif
-        next_b->prev = new_b;
-        k_mm_freelist_insert(mmhead, new_b);
+        next_b->prev = new_b; /* 物理位置上前一个block */
+        k_mm_freelist_insert(mmhead, new_b); /* 把新分裂出来的block插入同样level的block list */
     } else {
         next_b->buf_size &= (~RHINO_MM_PREVFREE);
     }

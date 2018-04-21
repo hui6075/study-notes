@@ -33,7 +33,7 @@ idle_count_t idle_count_get(void)
 #endif
 
 void idle_task(void *arg)
-{
+{ /* idle½ø³Ì */
     CPSR_ALLOC();
 
     /* avoid warning */

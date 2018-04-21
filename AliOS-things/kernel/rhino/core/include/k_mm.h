@@ -67,7 +67,7 @@ typedef struct k_mm_list_struct {
     size_t       dye;
     size_t       owner;
 #endif
-    struct k_mm_list_struct *prev;
+    struct k_mm_list_struct *prev; /* 物理位置上前一个block */
     /* bit 0 indicates whether the block is used and */
     /* bit 1 allows to know whether the previous block is free */
     size_t       buf_size;
@@ -87,7 +87,7 @@ typedef struct {
 #if (RHINO_CONFIG_MM_REGION_MUTEX == 1)
     kmutex_t            mm_mutex;
 #endif
-    k_mm_region_info_t *regioninfo;
+    k_mm_region_info_t *regioninfo; /* 把各个region组织起来 */
     k_mm_list_t        *fixedmblk;
 
 #if (K_MM_STATISTIC > 0)
@@ -100,7 +100,9 @@ typedef struct {
     uint32_t            free_bitmap;
     /* freelist[N]: contain free blks at level N, 
        2^(N + MM_MIN_BIT) <= level N buffer size < 2^(1 + N + MM_MIN_BIT) */
-    k_mm_list_t        *freelist[MM_BIT_LEVEL];
+       /* 每一个元素指向的k_mm_list_t包含的内存空间相同*/
+       /* 组成一个环形双链表 */
+    k_mm_list_t        *freelist[MM_BIT_LEVEL]; /* 64 ~ 128, 128 ~ 256, ..., 64M~128M */
 } k_mm_head;
 
 
