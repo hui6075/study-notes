@@ -239,7 +239,7 @@ void cli_service_init(kinit_t *kinit)
 #endif
 
 int aos_kernel_init(kinit_t *kinit)
-{
+{ /* 内核初始化 */
 #ifdef AOS_VFS
     vfs_init();
     vfs_device_init();
@@ -261,7 +261,7 @@ int aos_kernel_init(kinit_t *kinit)
 #endif
 
 #ifdef AOS_LOOP
-    aos_loop_init();
+    aos_loop_init(); /* 单例模式初始化一个yloop */
 #endif
 
 #ifdef VCALL_RHINO

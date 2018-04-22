@@ -9,7 +9,7 @@
 #include <stdio.h>
 
 #define MAX_FILE_NUM (AOS_CONFIG_VFS_DEV_NODES * 2)
-static file_t files[MAX_FILE_NUM];
+static file_t files[MAX_FILE_NUM]; /* 50 */
 
 file_t *new_file(inode_t *node)
 {

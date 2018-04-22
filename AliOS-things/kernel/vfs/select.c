@@ -283,7 +283,7 @@ int aos_poll(struct pollfd *fds, int nfds, int timeout)
         goto check_poll;
     }
 
-    ret = wait_io(ret, &rfds, &parg, timeout);
+    ret = wait_io(ret, &rfds, &parg, timeout); /* select() */
 
     if (ret >= 0) {
         int i;

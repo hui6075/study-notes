@@ -85,7 +85,7 @@ int aos_event_service_init(void)
         local_event.fd = fd;
     }
     aos_poll_read_fd(fd, event_read_cb, NULL);
-    aos_loop_set_eventfd(fd);
+    aos_loop_set_eventfd(fd); /* ÉèÖÃyloopµÄeventfd */
 
     return 0;
 }

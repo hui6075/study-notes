@@ -26,7 +26,7 @@ typedef struct {
     const name_t    *task_name;
 #if (RHINO_CONFIG_TASK_INFO > 0)
     /* access by assemble code, so do not change position */
-    void            *user_info[RHINO_CONFIG_TASK_INFO_NUM];
+    void            *user_info[RHINO_CONFIG_TASK_INFO_NUM]; /* yloop_ctx_t等 */
 #endif
 
     cpu_stack_t     *task_stack_base; /* 任务栈起始地址 */
