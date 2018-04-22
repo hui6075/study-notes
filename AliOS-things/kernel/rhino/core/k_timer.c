@@ -377,7 +377,7 @@ static void timer_cmd_proc(k_timer_queue_cb *cb)
 static void timer_task(void *pa)
 { /* 定时器任务(类似Linux内核线程) */
     ktimer_t         *timer;
-    k_timer_queue_cb  cb_msg;
+    k_timer_queue_cb  cb_msg; /* 来自用户任务的定时器(回调函数、参数) */
     kstat_t           err;
     sys_time_t        tick_start;
     sys_time_t        tick_end;
@@ -404,13 +404,13 @@ static void timer_task(void *pa)
             delta = (sys_time_i_t)timer->match - (sys_time_i_t)tick_start;
             if (delta > 0) { /* 以最近一个定时事件剩余时间为超时时间去读取定时器队列 */
                 err = krhino_buf_queue_recv(&g_timer_queue, (tick_t)delta, &cb_msg, &msg_size); 
-                tick_end = krhino_sys_tick_get();
+                tick_end = krhino_sys_tick_get(); /* 运行到此 */
                 if (err == RHINO_BLK_TIMEOUT) {
                     g_timer_count = tick_end;
                 }
                 else if (err == RHINO_SUCCESS) {
                     g_timer_count = tick_end;
-                    timer_cmd_proc(&cb_msg);
+                    timer_cmd_proc(&cb_msg); /* 如果有新的定时器，处理一下 */
                 }
                 else {
                     k_err_proc(RHINO_SYS_FATAL_ERR);
@@ -419,7 +419,7 @@ static void timer_task(void *pa)
             else {
                 g_timer_count = tick_start;
             }
-                timer_cb_proc();
+                timer_cb_proc(); /* 遍历g_timer_head，挨个处理超时的定时器 */
         }
     }
 }

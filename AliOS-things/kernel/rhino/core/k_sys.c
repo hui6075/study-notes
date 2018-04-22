@@ -93,6 +93,25 @@ kstat_t krhino_start(void)
 #endif
 
         g_sys_stat = RHINO_RUNNING;
+
+       /* cpu_first_task_start:
+           ;set PendSV prority to the lowest
+           ;set Systick prority to the lowest
+           ;indicate PendSV_Handler branch to _pendsv_handler_nosave
+           ;align MSP to 8 byte
+           ;make PendSV exception pending
+           ;goto PendSV_Handler 
+
+         PendSV_Handler:
+           ;branch if cpu_first_task_start //CBZ     R0, _pendsv_handler_nosave
+
+         _pendsv_handler_nosave
+           ;R0 = g_active_task->task_stack = context region
+           ;restore context
+           ;return stack = PSP(进程栈指针)
+           ;after exception return: stack = PSP
+           ;hardware restore R0~R3,R12,LR,PC,xPSR
+           */
         cpu_first_task_start();
 
         /* should not be here */
@@ -128,7 +147,11 @@ kstat_t krhino_intrpt_enter(void)
 #if (RHINO_CONFIG_INTRPT_STACK_OVF_CHECK > 0)
     krhino_intrpt_stack_ovf_check();
 #endif
-
+    /* cpu_intrpt_save
+    MRS     R0, PRIMASK //保存PRIMASK到R0
+    CPSID   I  //关中断
+    BX      LR     */
+    /* cpsr =  arm cpsr*/
     RHINO_CPU_INTRPT_DISABLE();
 
 #if (RHINO_CONFIG_CPU_PWR_MGMT > 0)
@@ -136,7 +159,10 @@ kstat_t krhino_intrpt_enter(void)
 #endif
 
     g_intrpt_nested_level[cpu_cur_get()]++;
-
+    /* cpu_intrpt_restore
+	MSR 	PRIMASK, R0 //恢复中断屏蔽寄存器的状态
+	BX      LR
+    */
     RHINO_CPU_INTRPT_ENABLE();
 
     return RHINO_SUCCESS;
@@ -166,11 +192,11 @@ void krhino_intrpt_exit(void)
         RHINO_CPU_INTRPT_ENABLE();
         return;
     }
-
+    /* 做一次task调度 */
     preferred_cpu_ready_task_get(&g_ready_queue, cur_cpu_num);
 
     if (g_preferred_ready_task[cur_cpu_num] == g_active_task[cur_cpu_num]) {
-        RHINO_CPU_INTRPT_ENABLE();
+        RHINO_CPU_INTRPT_ENABLE(); /* 如果不用切换任务，直接返回 */
         return;
     }
 
@@ -179,9 +205,24 @@ void krhino_intrpt_exit(void)
 #if (RHINO_CONFIG_CPU_NUM > 1)
     g_active_task[cur_cpu_num]->cur_exc = 0;
 #endif
-
+    /* cpu_intrpt_switch:
+          LDR 	R0, =SCB_ICSR //把内存地址0xE000ED04装载到R0寄存器(立即数寻址)
+          LDR 	R1, =ICSR_PENDSVSET //把0x10000000装载到R1寄存器
+          STR 	R1, [R0] //把立即数0x10000000存到内存地址0xE000ED04中
+          BX		LR
+        PendSV_Handler:
+          ;hardware saved R0~R3,R12,LR,PC,xPSR
+          ;save context
+          ;g_active_task->task_stack = context region
+          把栈指针设为g_active_task->task_stack
+          跳转到krhino_stack_ovf_check做一次栈溢出检查，然后恢复之前的task执行
+        */
     cpu_intrpt_switch();
 
+    /* cpu_intrpt_restore
+          MSR 	PRIMASK, R0 //恢复中断屏蔽寄存器的状态
+          BX      LR
+    */
     RHINO_CPU_INTRPT_ENABLE();
 }
 

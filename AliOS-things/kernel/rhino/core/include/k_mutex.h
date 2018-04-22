@@ -6,8 +6,8 @@
 #define K_MUTEX_H
 
 typedef struct mutex_s {
-    blk_obj_t       blk_obj;
-    ktask_t        *mutex_task; /* mutex owner task */
+    blk_obj_t       blk_obj; /* 包含事件名字、等待任务、调度策略 */
+    ktask_t        *mutex_task; /* 互斥锁当前持有者 */
     struct mutex_s *mutex_list; /* task mutex list */
     mutex_nested_t  owner_nested; /* 同一个任务嵌套占有互斥锁计数 */
 

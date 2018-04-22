@@ -5,7 +5,7 @@
 #include <k_api.h>
 
 void krhino_tick_proc(void)
-{
+{ /* 时钟中断服务程序 */
 #if (RHINO_CONFIG_INTRPT_GUARD > 0)
     soc_intrpt_guard();
 #endif
@@ -14,7 +14,7 @@ void krhino_tick_proc(void)
     krhino_tick_hook();
 #endif
 
-    tick_list_update(1);
+    tick_list_update(1); /* 调整tick_list, 把阻塞/睡眠超时的任务调整为RDY态 */
 
 #if (RHINO_CONFIG_SCHED_RR > 0)
     time_slice_update();

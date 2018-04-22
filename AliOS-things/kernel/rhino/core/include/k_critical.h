@@ -28,6 +28,7 @@
             RHINO_CPU_INTRPT_ENABLE();      \
         } while (0)
 #else
+/* 使能中断。并进行一次调度 */
 #define RHINO_CRITICAL_EXIT_SCHED()         \
         do {                                \
             intrpt_disable_measure_stop();  \

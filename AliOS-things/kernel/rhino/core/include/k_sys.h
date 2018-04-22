@@ -25,7 +25,7 @@ typedef int64_t         tick_i_t;
 #if (RHINO_CONFIG_CPU_STACK_DOWN > 0)
 extern cpu_stack_t *g_intrpt_stack_bottom;
 #else
-extern cpu_stack_t *g_intrpt_stack_top;
+extern cpu_stack_t *g_intrpt_stack_top; /* ÷–∂œ’ª∂•÷∏’Î */
 #endif
 #endif /* RHINO_CONFIG_INTRPT_STACK_OVF_CHECK */
 

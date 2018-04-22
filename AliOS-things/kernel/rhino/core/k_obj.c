@@ -11,7 +11,7 @@ runqueue_t   g_ready_queue; /* 就绪队列 */
 
 /* schedule lock counter */
 uint8_t      g_sched_lock[RHINO_CONFIG_CPU_NUM]; /* 关调度 */
-uint8_t      g_intrpt_nested_level[RHINO_CONFIG_CPU_NUM]; /* 中断嵌套计数 */
+uint8_t      g_intrpt_nested_level[RHINO_CONFIG_CPU_NUM]; /* 中断嵌套计数, 每次进/出中断时++/-- */
 
 /* highest pri task in ready queue */
 ktask_t     *g_preferred_ready_task[RHINO_CONFIG_CPU_NUM]; /* 调度结果 */
@@ -37,7 +37,7 @@ klist_t          g_timer_head;
 sys_time_t       g_timer_count;
 ktask_t          g_timer_task;
 cpu_stack_t      g_timer_task_stack[RHINO_CONFIG_TIMER_TASK_STACK_SIZE];
-kbuf_queue_t     g_timer_queue;
+kbuf_queue_t     g_timer_queue; /* 创建定时器的任务通过此队列发送定时器消息给timer_task */
 k_timer_queue_cb timer_queue_cb[RHINO_CONFIG_TIMER_MSG_NUM];
 #endif
 

@@ -21,7 +21,7 @@ typedef enum {
 typedef struct {
     /* update while task switching
        access by assemble code, so do not change position */
-    void            *task_stack; /* 任务栈 */
+    void            *task_stack; /* 任务栈顶 */
     /* access by activation, so do not change position */
     const name_t    *task_name;
 #if (RHINO_CONFIG_TASK_INFO > 0)

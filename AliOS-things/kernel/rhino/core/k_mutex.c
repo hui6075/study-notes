@@ -343,7 +343,7 @@ kstat_t krhino_mutex_lock(kmutex_t *mutex, tick_t ticks)
     }
 
     /* any way block the current task */  /* 此互斥锁已被其他任务持有，因此调整状态为PEND并挂到此互斥锁的阻塞队列 */
-    pend_to_blk_obj((blk_obj_t *)mutex, g_active_task[cur_cpu_num], ticks);
+    pend_to_blk_obj((blk_obj_t *)mutex, g_active_task[cur_cpu_num], ticks); /* 排队策略，FIFO/PRI */
 
     TRACE_MUTEX_GET_BLK(g_active_task[cur_cpu_num], mutex, ticks);
 

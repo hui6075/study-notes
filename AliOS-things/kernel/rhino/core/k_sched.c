@@ -153,11 +153,17 @@ void core_sched(void)
 
     cpu_task_switch();
 /*
-cpu_task_switch:(armv7)
-LDR  R0, =SCB_ICSR       //SCB_ICSR EQU 0xE000ED04 ; Interrupt Control and State Register.
-LDR	 R1, =ICSR_PENDSVSET //ICSR_PENDSVSET EQU 0x10000000 ; Value to trigger PendSV exception.
-STR	 R1, [R0]            //R1 -> *R0
-BX 	 LR                  //无条件跳转
+cpu_task_switch:(armv7, 触发PENDSV异常,跳转到PendSV_Handler)
+  LDR  R0, =SCB_ICSR       //SCB_ICSR EQU 0xE000ED04 ; Interrupt Control and State Register.
+  LDR	 R1, =ICSR_PENDSVSET //ICSR_PENDSVSET EQU 0x10000000 ; Value to trigger PendSV exception.
+  STR	 R1, [R0]            //R1 -> *R0
+  BX 	 LR
+PendSV_Handler:
+  ;hardware saved R0~R3,R12,LR,PC,xPSR
+  ;save context
+  ;g_active_task->task_stack = context region
+  把栈指针恢复为g_active_task的栈顶
+  然后做一次栈溢出检查,之后继续g_active_task的执行
 
 cpu_task_switch:(linux)
 swap_context()...
