@@ -1,0 +1,1218 @@
+#!/usr/bin/python
+# -*- coding: UTF-8 -*-
+# author: zhanjianhui
+
+from tkinter import *
+from tkinter import ttk
+from tkinter.filedialog import askdirectory
+from tkinter.filedialog import askopenfilenames
+from tkinter import scrolledtext
+from tkinter import messagebox
+from pathlib import Path
+from typing import List, Any
+
+from paramiko import *
+import os
+import threading
+import time
+import configparser
+import inspect
+import ctypes
+import traceback
+import requests
+import csv
+
+
+class ObjectGenerator:
+    def __init__(self,
+                 ip,
+                 port,
+                 user,
+                 password,
+                 cloud_code_dir,
+                 local_code_dir,
+                 product,
+                 ufdp,
+                 sdk,
+                 dev_type,
+                 product_file_list,
+                 ufdp_file_list,
+                 sdk_file_list,
+                 log_func,
+                 object_local_dir,
+                 product_object_cloud_dir,
+                 ufdp_object_cloud_dir,
+                 sdk_object_cloud_dir,
+                 object_vos_dir,
+                 product_compile_command,
+                 ufdp_compile_dir,
+                 patch_command):
+        self.ip = ip
+        self.port = port
+        self.user = user
+        self.password = password
+        self.cloud_code_dir = cloud_code_dir
+        self.local_code_dir = local_code_dir
+        self.product = product
+        self.ufdp = ufdp
+        self.sdk = sdk
+        self.dev_type = dev_type
+        self.ssh = SSHClient()
+        self.know_host = AutoAddPolicy()
+        self.ssh.set_missing_host_key_policy(self.know_host)
+        self.product_patch_file_list = product_file_list
+        self.ufdp_patch_file_list = ufdp_file_list
+        self.sdk_patch_file_list = sdk_file_list
+        self.log_func = log_func
+        self.object_local_dir = object_local_dir,
+        self.product_object_cloud_dir = product_object_cloud_dir,
+        self.ufdp_object_cloud_dir = ufdp_object_cloud_dir,
+        self.sdk_object_cloud_dir = sdk_object_cloud_dir,
+        self.object_vos_dir = object_vos_dir,
+        self.product_compile_command = product_compile_command,
+        self.ufdp_compile_dir = ufdp_compile_dir,
+        self.patch_command = patch_command
+        self.shell = None
+        self.trans = None
+        self.sftp = None
+        self.env_str_1 = 'please input:'
+        self.env_str_2 = 'please select:'
+        self.env_str_selected = 'you have select!'
+        self.make_str_product_ok = '编译成功'
+        self.make_str_ufdp_sdk_ok = '编译成功'
+
+    def try_connect(self):
+        self.ssh.connect(hostname=self.ip, port=self.port, username=self.user, password=self.password, timeout=2.0)
+        ret = getattr(self.ssh.get_transport(), 'is_active', None)
+        if ret is None or (ret is not None and not ret()):
+            return -1
+        return 0
+
+    def try_execute_command(self, command):
+        self.log_func(command)
+        stdin, stdout, stderr = self.ssh.exec_command(command=command, timeout=3)
+        res, err = stdout.read(), stderr.read()
+        if res:
+            self.log_func(res.decode())
+            return 0
+        else:
+            self.log_func(err.decode())
+            return -1
+
+    def test(self):
+        try:
+            ret = self.try_connect()
+            if ret != 0:
+                self.log_func('计算云连接失败！')
+                return ret
+            else:
+                self.log_func('计算云连接成功！\r\n')
+            ret = self.try_execute_command(command='ls -l ' + self.cloud_code_dir)
+            if ret != 0:
+                self.log_func('计算云代码路径检查失败！')
+                return ret
+            else:
+                self.log_func('计算云代码路径检查成功！')
+            return ret
+        except SystemExit:
+            self.close_io()
+            return -1
+        except Exception as e:
+            self.log_func('计算云测试失败： ' + str(e) + '\r\n\r\n')  # + traceback.format_exc()
+            self.close_io()
+            return -1
+
+    def build(self):
+        print('make type ' + 'product:' + self.product + ' ufdp:' + self.ufdp + ' sdk:' + self.sdk)
+        res = 0
+        try:
+            self.try_open_shell_and_sftp()
+            if self.product == 'yes':
+                res = self.set_prduct_env()
+                if res < 0:
+                    print("set_prodct_env() return: " + str(res))
+                    self.log_func('设置环境变量失败！')
+                    return res
+                res = self.make_product(self.product_patch_file_list)
+                if res < 0:
+                    print("make_product() return: " + str(res))
+                    self.log_func('编译product object失败！')
+                    return res
+            if self.ufdp == 'yes':
+                res = self.make_ufdp_and_sdk(patch_type='ufdp', file_list=self.ufdp_patch_file_list)
+                if res < 0:
+                    print("make_ufdp_and_sdk(ufdp) return: " + str(res))
+                    self.log_func('编译ufdp object失败！')
+                    return res
+            if self.sdk == 'yes':
+                res = self.make_ufdp_and_sdk(patch_type='sdk', file_list=self.sdk_patch_file_list)
+                if res < 0:
+                    print("make_ufdp_and_sdk(sdk) return: " + str(res))
+                    self.log_func('编译sdk object失败！')
+                    return res
+            return res
+        except SystemExit:
+            self.close_io()
+            return -1
+        except Exception as e:
+            self.close_io()
+            self.log_func('计算云补丁编译失败： ' + str(e) + '\r\n\r\n' + traceback.format_exc())  # + traceback.format_exc()
+            return -1
+
+    def recv_until(self, sub_string):
+        result = ''
+        while True:
+            res = self.shell.recv(65535)
+            result += str(res.decode())
+            self.log_func('\r\n'+str(res.decode()))
+            time.sleep(0.1)
+            if result.find(sub_string) >= 0:
+                break
+        return result
+
+    def get_seq_from_env(self, result):
+        env_list = result.split('\r\n')
+        for line in env_list:
+            if line.find(self.dev_type) >= 0:
+                return str(line[0:1])
+        self.log_func('补丁类型不存在！')
+        return 'q'
+
+    # TODO
+    def get_cloud_patch_path(self, patch_type, file, source):
+        p = Path(file)
+        file_name = p.name
+        if source is False:
+            file_name = p.stem + '.c'
+        if patch_type == 'product':
+            return self.cloud_code_dir + '/' + file_name
+        elif patch_type == 'ufdp':
+            return self.cloud_code_dir + '/' + file_name
+        elif patch_type == 'sdk':
+            return self.cloud_code_dir + '/' + file_name
+
+    # TODO
+    def get_local_patch_path(self, file):
+        p = Path(file)
+        return self.local_code_dir + '/' + p.stem + '.c'
+
+    @staticmethod
+    def convert_to_win32_path(path: str) -> str:
+        return path.replace(r'\/'.replace(os.sep, ''), os.sep)
+
+    # TODO
+    def make_product(self, file_list):
+        print('enter product function maker')
+        # 上传补丁文件
+        for file in file_list:
+            cloud_product_patch_file = self.get_cloud_patch_path(source=True, patch_type='product', file=file)
+            self.log_func('\r\nput:\t%s\r\nto:\t%s:%s' % (file, self.ip, cloud_product_patch_file))
+            self.sftp.put(file, cloud_product_patch_file)
+            self.log_func('\r\n补丁文件 %s 上传成功！' % Path(file).name)
+        self.log_func('\r\n')
+        # 执行编译脚本
+        # self.shell.send('cd ' + self.cloud_code_dir + ' && make patchobj.clean && make patchobj.build\n')
+        # result = self.recv_until(self.make_str_product_ok)
+        for file in file_list:
+            cloud_product_patch_object = self.get_cloud_patch_path(source=False, patch_type='product', file=file)
+            local_patch_object = self.get_local_patch_path(file)
+            # 通过查看.o是否生成，判断编译是否成功
+            result = self.try_execute_command(command='ls ' + cloud_product_patch_object)
+            if result < 0:
+                self.log_func('错误：补丁文件 %s 编译失败，请检查编译日志！' % Path(file).name)
+                return -1
+            self.log_func('\r\n补丁文件 %s 编译成功！' % Path(file).name)
+            # 下载.o文件
+            self.log_func('\r\nget:\t%s:%s\r\nto:\t%s' % (self.ip, cloud_product_patch_object, local_patch_object))
+            self.sftp.get(cloud_product_patch_object, local_patch_object)
+            self.log_func('\r\n补丁文件 %s.o 下载成功！' % Path(file).stem)
+        self.log_func('\r\n')
+        return 0
+
+    # TODO
+    def make_ufdp_and_sdk(self, patch_type, file_list):
+        print('enter %s function maker' % patch_type)
+        for file in file_list:
+            cloud_ufdp_patch_file = self.get_cloud_patch_path(source=True, patch_type=patch_type, file=file)
+            self.log_func('\r\nput:\t%s\r\nto:\t%s:%s' % (file, self.ip, cloud_ufdp_patch_file))
+            self.sftp.put(file, cloud_ufdp_patch_file)
+            self.log_func('\r\n补丁文件 %s 上传成功！' % Path(file).name)
+        self.log_func('\r\n')
+        # 执行编译脚本
+        # self.shell.send('cd ' + self.cloud_code_dir + '/code/ufdp/project/patch' + '\n')
+        # self.shell.send('./auto_clean_patch.sh && ./auto_make_patch.sh\n')
+        # result = self.recv_until(self.make_str_ufdp_sdk_ok)
+        for file in file_list:
+            cloud_ufdp_patch_object = self.get_cloud_patch_path(source=False, patch_type=patch_type, file=file)
+            local_patch_object = self.get_local_patch_path(file)
+            # 通过查看.o是否生成，判断编译是否成功
+            result = self.try_execute_command(command='ls ' + cloud_ufdp_patch_object)
+            if result < 0:
+                self.log_func('错误：补丁文件 %s 编译失败，请检查编译日志！' % Path(file).name)
+                return -1
+            self.log_func('补丁文件 %s 编译成功！' % Path(file).name)
+            # 下载.o文件
+            self.log_func('\r\nget:\t%s:%s\r\nto:\t%s' % (self.ip, cloud_ufdp_patch_object, local_patch_object))
+            self.sftp.get(cloud_ufdp_patch_object, local_patch_object)
+            self.log_func('\r\n补丁文件 %s.o 下载成功！' % Path(file).stem)
+        self.log_func('\r\n')
+        return 0
+
+    def set_prduct_env(self):
+        # 设置环境变量
+        self.shell.send('cd ' + self.cloud_code_dir + '/build' + '\n')
+        self.shell.send('source env.sh' + '\n')
+        result = self.recv_until(self.env_str_1)  # 通过收到指定回显判断命令行执行成功
+        sequence = self.get_seq_from_env(result)
+        if sequence == 'q':
+            return -1
+        self.shell.send(sequence + '\n')
+        result = self.recv_until(self.env_str_2)
+        sequence = self.get_seq_from_env(result)
+        if sequence == 'q':
+            return -1
+        self.shell.send(sequence + '\n')
+        result = self.recv_until(self.env_str_selected)
+        if result.find(self.env_str_selected) < 0:
+            return -1
+        return 0
+
+    def try_open_shell_and_sftp(self):
+        self.shell = self.ssh.invoke_shell()
+        self.shell.settimeout(900)
+        self.trans = Transport((self.ip, self.port))
+        self.trans.connect(username=self.user, password=self.password)
+        self.sftp = SFTPClient.from_transport(self.trans)
+
+    def close_io(self):
+        if self.shell is not None:
+            self.shell.close()
+        if self.sftp is not None:
+            self.sftp.close()
+        if self.trans is not None:
+            self.trans.close()
+        self.ssh.close()
+
+
+class VosDownloader:
+    def __init__(self, user, password, file, version, print_download_func, stop_thread_func, log_func):
+        self.user = user
+        self.password = password
+        self.file = file
+        self.version = version
+        self.print_download_func = print_download_func
+        self.stop_thread_func = stop_thread_func
+        self.log_func = log_func
+
+    def download(self):
+        url = "http://w3.com/SvltLogin"
+        print_thread = None
+        try:
+            s = requests.session()
+            # response = s.post(url, data={"txtUsr_id": "00000001", "txtPassword": "mima"})
+            # 判断是否登录成功
+            # self.log_func('登录成功')
+            url = "http://w3.com/a.csv"
+            self.log_func('正在下载vos.o')
+            print_thread = threading.Thread(target=self.print_download_func, args=(5,))
+            print_thread.start()
+            response = s.get(url=url, timeout=900)
+            with open("C:\\a.csv", "wb") as f:
+                f.write(response.content)
+            self.stop_thread_func(print_thread)
+            response = s.get("http://w3.com/SvltLogout")
+            # 判断是否注销成功
+            return 0
+        except Exception:
+            if print_thread is not None:
+                self.stop_thread_func(print_thread)
+            self.log_func('下载vos.o失败')
+            return -1
+
+
+class PatchMaker:
+    def __init__(self, make_bat, log_func, object_num):
+        self.make_bat = make_bat
+        self.log_func = log_func
+        self.object_num = object_num
+
+    def make(self):
+        result = os.popen(self.make_bat)
+        res = result.read()
+        self.log_func(res.format())
+        success_str = 'Successfull'
+        object_cnt = 0
+        for line in res.splitlines():
+            if line.find(success_str) > 0:
+                object_cnt = object_cnt + 1
+        print('object num: ' + str(self.object_num) + '    object cnt: ' + str(object_cnt))
+        if object_cnt == 0:
+            self.log_func('补丁压制失败，请检查日志！')
+            return -1
+        elif object_cnt < self.object_num:
+            self.log_func('一共选择了%d个补丁文件，其中%d个补丁压制失败，请检查日志！'%(self.object_num, self.object_num - object_cnt))
+            return -1
+        return 0
+
+
+class MainWindow:
+    product_patch_list: List[Any]
+    ufdp_patch_list: List[Any]
+    sdk_patch_list: List[Any]
+    micro_patch_list: List[Any]
+    window = Tk()
+    window.title('LSW一键制作补丁')
+    window.geometry('1250x650')
+    window.resizable(0,0)
+    menu_bar = Menu(window, tearoff=False)
+    font_size = 10
+
+    def __init__(self):
+        self.patch_version = 'V200R19C00SPC300B262'
+        self.cloud_ip = '192.168.150.129'
+        self.cloud_port = 22
+        self.cloud_user = 'root'
+        self.cloud_password = 'Root@123'
+        self.cloud_code_directory = '/usr1/z00452819/V200R19C00'
+        self.w3_user = 'z00452819'
+        self.w3_password = '123456'
+        self.local_code_directory_var = StringVar(value='D:/code/V2R19')
+        self.local_product_patch_file_var = StringVar(value='D:/code/lighttpd-1.4.48/src/array.c')
+        self.local_ufdp_patch_file_var = StringVar(value='D:/code/lighttpd-1.4.48/src/base64.c')
+        self.local_sdk_patch_file_var = StringVar(value='D:/code/lighttpd-1.4.48/src/etag.c')
+        self.local_micro_patch_file_var = StringVar(value='D:/code/lighttpd-1.4.48/src/test.bin')
+        self.patch_out_path_var = StringVar(value='D:/1patch')
+        self.download_vos_var = StringVar(value='no')
+        self.product_patch_var = StringVar(value='no')
+        self.ufdp_patch_var = StringVar(value='no')
+        self.sdk_patch_var = StringVar(value='no')
+        self.micro_patch_var = StringVar(value='no')
+        self.board_type_var = StringVar(value='6720EI')
+        self.patch_file = None
+        self.stop_process = False
+        self.product_patch_list = []
+        self.ufdp_patch_list = []
+        self.sdk_patch_list = []
+        self.object_num = 0
+        self.data_file = None
+        self.object_local_dir = None            # 1
+        self.product_object_cloud_dir = None    # 2
+        self.ufdp_object_cloud_dir = None       # 3
+        self.sdk_object_cloud_dir = None        # 4
+        self.micro_object_cloud_dir = None
+        self.object_vos_dir = None              # 5
+        self.product_compile_command = 'make patchobj.clean && make patchobj.build'
+        self.ufdp_compile_dir = None            # 6
+        self.patch_command = None               # 7
+        self.local_data = \
+            [['np', 'code/project/9300/patch/patch_np', 'build/project/9300/patch/np', 'code/ufdp/project/9300np/np/fpi',
+              'code/ufdp/project/9300np/np/sdk', 'code/project/9300/patch/patchbase_common', 'code/ufdp/project/9300np', 'code/project/9300/patch/make_patch_all.bat'],
+             [],
+             [],
+             [],
+             []
+             ]
+
+        self.generate_label('日志：', 550, 10)
+        self.out_put = scrolledtext.ScrolledText(self.window, width=95, height=37, undo=True, maxundo=10)
+        self.out_put.place(x=550, y=40)
+        self.out_put.bind('<Button-3>', lambda x: self.right_key(x, self.out_put))
+
+        self.load_config()
+
+        # 形态下拉选择代码
+        Label(self.window, text='形    态：', font=('宋体', self.font_size)).place(x=10, y=40)
+        self.board_list_box = ttk.Combobox(self.window, textvariable=self.board_type_var)
+        self.board_list_box.place(x=150, y=40)
+        # TODO
+        self.board_list_box['value'] = ['6720EI', '5730SI', 'NP', 'MPUD', 'NP5981']
+        self.board_list_box.current(self.board_list_box['value'].index(self.board_type_var.get()))
+        self.board_list_box['state'] = 'readonly'
+
+        self.product_check,\
+        self.ufdp_check,\
+        self.sdk_check,\
+        self.micro_check = self.generate_check_button(label_text='补丁类型：',
+                                                      radio_text1='Product',
+                                                      radio_text2='Ufdp',
+                                                      radio_text3='Sdk',
+                                                      radio_text4='微码',
+                                                      radio_variable1=self.product_patch_var,
+                                                      radio_variable2=self.ufdp_patch_var,
+                                                      radio_variable3=self.sdk_patch_var,
+                                                      radio_variable4=self.micro_patch_var,
+                                                      command1=self.set_product_button_status,
+                                                      command2=self.set_ufdp_button_status,
+                                                      command3=self.set_sdk_button_status,
+                                                      command4=self.set_micro_button_status,
+                                                      x=10, y=70)
+
+        self.vos_radio_yes, self.vos_radio_no = self.generate_radio_button(label_text='是否下载vos.o：',
+                                                                           radio_text1='是',
+                                                                           radio_text2='否',
+                                                                           radio_variable=self.download_vos_var,
+                                                                           radio_value1='yes',
+                                                                           radio_value2='no',
+                                                                           command=self.on_click_vos_download_radio,
+                                                                           x=10, y=400)
+
+        self.patch_version_entry = self.generate_text_button(label_text='大包版本：',
+                                                             entry_default_value=self.patch_version,
+                                                             show_type=None,
+                                                             x=10, y=10)
+
+        self.cloud_user_entry = self.generate_text_button(label_text='计算云账号：',
+                                                          entry_default_value=self.cloud_user,
+                                                          show_type=None,
+                                                          x=10, y=280)
+
+        self.cloud_password_entry = self.generate_text_button(label_text='计算云密码：',
+                                                              entry_default_value=self.cloud_password,
+                                                              show_type='*',
+                                                              x=10, y=310)
+
+        self.cloud_ip_entry = self.generate_text_button(label_text='计算云IP：',
+                                                        entry_default_value=self.cloud_ip,
+                                                        show_type=None,
+                                                        x=10, y=340)
+
+        self.cloud_path_entry = self.generate_text_button(label_text='计算云代码目录：',
+                                                          entry_default_value=self.cloud_code_directory,
+                                                          show_type=None,
+                                                          x=10, y=370)
+
+        Label(self.window, text='说明：').place(x=10, y=490)
+        Label(self.window, text='    1. 执行成功的配置文件存放在C:/Users/用户名/1patch').place(x=10, y=510)
+        Label(self.window, text='    2. 如果本地已存在相应的vos.o，请不要再勾选下载vos.o').place(x=10, y=530)
+        Label(self.window, text='    3. 多个补丁文件请用";"隔开').place(x=10, y=550)
+
+        self.w3_user_entry = self.generate_text_button(label_text='W3账号：',
+                                                       entry_default_value=self.w3_user,
+                                                       show_type=None,
+                                                       x=10, y=430)
+
+        self.w3_password_entry = self.generate_text_button(label_text='W3密码：',
+                                                           entry_default_value=self.w3_password,
+                                                           show_type='*',
+                                                           x=10, y=460)
+        self.w3_user_entry['state'] = 'disable'
+        self.w3_password_entry['state'] = 'disable'
+
+        self.local_path,\
+        self.local_path_select,\
+        self.local_path_reset = self.generate_path_button(label_text='本地代码目录：',
+                                                          entry_default_value=self.local_code_directory_var,
+                                                          command=self.select_local_code_directory,
+                                                          x=10, y=220)
+
+        self.local_product_file_entry,\
+        self.local_product_file_select,\
+        self.local_product_file_reset = self.generate_path_button(label_text='本地pdt 补丁文件：',
+                                                                  entry_default_value=self.local_product_patch_file_var,
+                                                                  command=self.select_product_patch_file, x=10, y=100)
+
+        self.set_path_attri(state=self.product_patch_var.get(),
+                            entry=self.local_product_file_entry,
+                            select=self.local_product_file_select,
+                            reset=self.local_product_file_reset)
+
+        self.local_ufdp_file_entry,\
+        self.local_ufdp_file_select,\
+        self.local_ufdp_file_reset = self.generate_path_button(label_text='本地ufdp补丁文件：',
+                                                               entry_default_value=self.local_ufdp_patch_file_var,
+                                                               command=self.select_ufdp_patch_file,
+                                                               x=10, y=130)
+        self.set_path_attri(state=self.ufdp_patch_var.get(),
+                            entry=self.local_ufdp_file_entry,
+                            select=self.local_ufdp_file_select,
+                            reset=self.local_ufdp_file_reset)
+
+        self.local_sdk_file_entry, \
+        self.local_sdk_file_select, \
+        self.local_sdk_file_reset = self.generate_path_button(label_text='本地sdk 补丁文件：',
+                                                              entry_default_value=self.local_sdk_patch_file_var,
+                                                              command=self.select_sdk_patch_file,
+                                                              x=10, y=160)
+        self.set_path_attri(state=self.sdk_patch_var.get(),
+                            entry=self.local_sdk_file_entry,
+                            select=self.local_sdk_file_select,
+                            reset=self.local_sdk_file_reset)
+
+        self.local_micro_file_entry, \
+        self.local_micro_file_select, \
+        self.local_micro_file_reset = self.generate_path_button(label_text='本地微码补丁文件：',
+                                                                entry_default_value=self.local_micro_patch_file_var,
+                                                                command=self.select_micro_patch_file,
+                                                                x=10, y=190)
+        self.set_path_attri(state=self.micro_patch_var.get(),
+                            entry=self.local_micro_file_entry,
+                            select=self.local_micro_file_select,
+                            reset=self.local_micro_file_reset)
+
+        self.patch_out_path_entry,\
+        self.patch_out_path_select,\
+        self.patch_out_path_reset = self.generate_path_button(label_text='补丁输出目录：',
+                                                              entry_default_value=self.patch_out_path_var,
+                                                              command=self.select_patch_out_path,
+                                                              x=10, y=250)
+
+        self.start_button = self.generate_button(button_text='开始制作补丁',
+                                                 command=self.start_make_patch,
+                                                 x1=140, y1=580)
+
+        self.stop_button = self.generate_button(button_text='强制停止制作',
+                                                command=self.force_stop,
+                                                x1=280, y1=580)
+        self.stop_button['state'] = 'disable'
+
+        self.start_open_dir = self.generate_button(button_text='打开补丁目录',
+                                                   command=self.open_dir,
+                                                   x1=800, y1=550)
+        self.start_open_dir['state'] = 'disabled'
+        self.generate_object_thread = None
+
+    def generate_object(self):
+        print('threading start')
+        print('datafile: %s' % self.data_file)
+        download_data_result = False
+        if self.data_file is None:
+            download_data_result = self.download_project_data()
+        #download_data_result = True
+        #if download_data_result is True:
+        #    if self.process_csv_data() is False:
+        #        if self.process_local_data() is False:
+        #            self.log_output('查找目录和编译命令失败！')
+        #            self.stop_work()
+        #            return
+        self.stop_button['state'] = 'normal'
+        patch_object = ObjectGenerator(ip=self.cloud_ip,
+                                       port=self.cloud_port,
+                                       user=self.cloud_user,
+                                       password=self.cloud_password,
+                                       cloud_code_dir=self.cloud_code_directory,
+                                       local_code_dir=self.local_code_directory_var.get(),
+                                       product=self.product_patch_var.get(),
+                                       ufdp=self.ufdp_patch_var.get(),
+                                       sdk=self.sdk_patch_var.get(),
+                                       dev_type=self.board_type_var.get(),
+                                       product_file_list=self.product_patch_list,
+                                       ufdp_file_list=self.ufdp_patch_list,
+                                       sdk_file_list=self.sdk_patch_list,
+                                       log_func=self.log_output,
+                                       object_local_dir=self.object_local_dir,
+                                       product_object_cloud_dir=self.product_object_cloud_dir,
+                                       ufdp_object_cloud_dir=self.ufdp_object_cloud_dir,
+                                       sdk_object_cloud_dir=self.sdk_object_cloud_dir,
+                                       object_vos_dir=self.object_vos_dir,
+                                       product_compile_command=self.product_compile_command,
+                                       ufdp_compile_dir=self.ufdp_compile_dir,
+                                       patch_command=self.patch_command)
+
+        try:
+            # 测试计算云连接情况
+            test_result = patch_object.test()
+            if test_result < 0:
+                print('test failed...............')
+                self.stop_work()
+                return
+            # 编译补丁
+            build_result = patch_object.build()
+            patch_object.close_io()
+            if build_result < 0:
+                print('build failed...............')
+                self.stop_work()
+                return
+            # 下载vos.o
+            if self.download_vos_var.get() == 'yes':
+                vos_file = self.get_vos_file()
+                vos_downloader = VosDownloader(user=self.w3_user,
+                                               password=self.w3_password,
+                                               file=vos_file,
+                                               version=self.patch_version,
+                                               print_download_func=self.print_downloading,
+                                               stop_thread_func=self.stop_thread,
+                                               log_func=self.log_output)
+                download_result = vos_downloader.download()
+                if download_result < 0:
+                    print('download vos failed.........')
+                    self.stop_work()
+                    return
+                self.download_vos_var.set('no')
+            # 压制补丁
+            make_command = self.get_bat_command()
+            print('starting make patch, object num: %d' % self.object_num)
+            patch_maker = PatchMaker(make_bat=make_command, log_func=self.log_output, object_num=self.object_num)
+            make_result = patch_maker.make()
+            if make_result < 0:
+                print('make patch failed.........')
+                self.stop_work()
+                return
+            # 补丁制作完成
+            self.finish_work()
+        except SystemExit:
+            self.log_output('补丁制作被中断！')
+            self.stop_work()
+            return
+
+    # TODO
+    def start_make_patch(self):
+        if self.product_patch_var.get() == 'no' and self.ufdp_patch_var.get() == 'no' \
+                and self.sdk_patch_var.get() == 'no' and self.micro_patch_var.get() == 'no':
+            messagebox.showinfo(title='提示', message='没有选择需要制作的补丁类型，请选择后重新制作补丁。')
+            return
+
+        file_list_str = self.local_product_patch_file_var.get()
+        if file_list_str[-1] == ';':
+            file_list_str = file_list_str[:-1]
+        self.product_patch_list = file_list_str.split(';')
+        for file in self.product_patch_list:
+            self.product_patch_list[self.product_patch_list.index(file)] = file.strip()
+
+        file_list_str = self.local_ufdp_patch_file_var.get()
+        if file_list_str[-1] == ';':
+            file_list_str = file_list_str[:-1]
+        self.ufdp_patch_list = file_list_str.split(';')
+        for file in self.ufdp_patch_list:
+            self.ufdp_patch_list[self.ufdp_patch_list.index(file)] = file.strip()
+
+        file_list_str = self.local_sdk_patch_file_var.get()
+        if file_list_str[-1] == ';':
+            file_list_str = file_list_str[:-1]
+        self.sdk_patch_list = file_list_str.split(';')
+        for file in self.sdk_patch_list:
+            self.sdk_patch_list[self.sdk_patch_list.index(file)] = file.strip()
+
+        file_list_str = self.local_micro_patch_file_var.get()
+        if file_list_str[-1] == ';':
+            file_list_str = file_list_str[:-1]
+        self.micro_patch_list = file_list_str.split(';')
+        for file in self.micro_patch_list:
+            self.micro_patch_list[self.micro_patch_list.index(file)] = file.strip()
+
+        self.start_button['state'] = 'disabled'
+        self.start_open_dir['state'] = 'disabled'
+        self.stop_process = False
+        self.get_parameter()
+        self.show_current_configuration()
+        if self.check_parameter() is False:
+            self.stop_work()
+            return
+        self.generate_object_thread = threading.Thread(target=self.generate_object)
+        self.generate_object_thread.start()
+
+    def force_stop(self):
+        if self.generate_object_thread is not None:
+            self.stop_thread(self.generate_object_thread)
+            self.stop_button['state'] = 'disable'
+        return
+
+    def load_config(self):
+        try:
+            config_file = self.convert_to_win32_path(str(Path.home())+'\\1patch\\conf.ini')
+            p = Path(config_file)
+            if p.is_file() is True:
+                cf = configparser.ConfigParser()
+                cf.read(config_file)
+                if 'last_version' in cf['basic_config']:
+                    self.patch_version = cf.get('basic_config', 'last_version')
+                if 'board_type' in cf['basic_config']:
+                    self.board_type_var.set(cf.get('basic_config', 'board_type'))
+                if 'product' in cf['basic_config']:
+                    self.product_patch_var.set(cf.get('basic_config', 'product'))
+                if 'ufdp' in cf['basic_config']:
+                    self.ufdp_patch_var.set(cf.get('basic_config', 'ufdp'))
+                if 'sdk' in cf['basic_config']:
+                    self.sdk_patch_var.set(cf.get('basic_config', 'sdk'))
+                if 'cloud_ip' in cf['basic_config']:
+                    self.cloud_ip = cf.get('basic_config', 'cloud_ip')
+                if 'cloud_user' in cf['basic_config']:
+                    self.cloud_user = cf.get('basic_config', 'cloud_user')
+                if 'cloud_password' in cf['basic_config']:
+                    self.cloud_password = cf.get('basic_config', 'cloud_password')
+                if 'cloud_path' in cf['basic_config']:
+                    self.cloud_code_directory = cf.get('basic_config', 'cloud_path')
+                if 'w3_user' in cf['basic_config']:
+                    self.w3_user = cf.get('basic_config', 'w3_user')
+                if 'w3_password' in cf['basic_config']:
+                    self.w3_password = cf.get('basic_config', 'w3_password')
+                if 'local_code_directory' in cf['basic_config']:
+                    self.local_code_directory_var.set(cf.get('basic_config', 'local_code_directory'))
+                if 'local_product_patch_file' in cf['basic_config']:
+                    self.local_product_patch_file_var.set(cf.get('basic_config', 'local_product_patch_file'))
+                if 'local_ufdp_patch_file' in cf['basic_config']:
+                    self.local_ufdp_patch_file_var.set(cf.get('basic_config', 'local_ufdp_patch_file'))
+                if 'local_sdk_patch_file' in cf['basic_config']:
+                    self.local_sdk_patch_file_var.set(cf.get('basic_config', 'local_sdk_patch_file'))
+                if 'local_micro_patch_file' in cf['basic_config']:
+                    self.local_micro_patch_file_var.set(cf.get('basic_config', 'local_micro_patch_file'))
+                if 'patch_directory' in cf['basic_config']:
+                    self.patch_out_path_var.set(cf.get('basic_config', 'patch_directory'))
+        except Exception as e:
+            self.log_output('读取配置文件异常：' + str(e))
+
+    def save_config(self):
+        try:
+            config_file_path = self.convert_to_win32_path(str(Path.home()) + '\\1patch')
+            config_file = self.convert_to_win32_path(config_file_path + '\\conf.ini')
+            p = Path(config_file_path)
+            if p.is_dir() is False:
+                p.mkdir(exist_ok=True, parents=True)
+            cf = configparser.ConfigParser()
+            cf.read(config_file)
+            if cf.has_section('basic_config') is False:
+                cf.add_section('basic_config')
+            cf.set('basic_config', 'last_version', self.patch_version)
+            cf.set('basic_config', 'board_type', self.board_type_var.get())
+            cf.set('basic_config', 'product', self.product_patch_var.get())
+            cf.set('basic_config', 'ufdp', self.ufdp_patch_var.get())
+            cf.set('basic_config', 'sdk', self.sdk_patch_var.get())
+            cf.set('basic_config', 'local_code_directory', self.local_code_directory_var.get())
+            cf.set('basic_config', 'local_product_patch_file', self.local_product_patch_file_var.get())
+            cf.set('basic_config', 'local_ufdp_patch_file', self.local_ufdp_patch_file_var.get())
+            cf.set('basic_config', 'local_sdk_patch_file', self.local_sdk_patch_file_var.get())
+            cf.set('basic_config', 'local_micro_patch_file', self.local_micro_patch_file_var.get())
+            cf.set('basic_config', 'patch_directory', self.patch_out_path_var.get())
+            cf.set('basic_config', 'cloud_ip', self.cloud_ip)
+            cf.set('basic_config', 'cloud_user', self.cloud_user)
+            cf.set('basic_config', 'cloud_password', self.cloud_password)
+            cf.set('basic_config', 'cloud_path', self.cloud_code_directory)
+            cf.set('basic_config', 'w3_user', self.w3_user)
+            cf.set('basic_config', 'w3_password', self.w3_password)
+            cf.write(open(config_file, 'w+'))
+        except Exception as e:
+            self.log_output('保存配置文件异常：' + str(e))
+
+    def show_current_configuration(self):
+        self.log_reset()
+        self.out_put.insert(END, '======================================================================='
+                                 '========================')
+        self.log_output('配置如下：')
+        self.log_output('大包版本\t\t： ' + self.patch_version)
+        self.log_output('形态\t\t： ' + self.board_type_var.get())
+        self.log_output('补丁类型\t\t：')
+        if self.product_patch_var.get() == 'yes':
+            self.out_put.insert(END, ' product ')
+        if self.ufdp_patch_var.get() == 'yes':
+            self.out_put.insert(END, ' ufdp ')
+        if self.sdk_patch_var.get() == 'yes':
+            self.out_put.insert(END, ' sdk ')
+        if self.product_patch_var.get() == 'yes':
+            index = 0
+            for file in self.product_patch_list:
+                if index is 0:
+                    self.log_output('product补丁文件\t： ' + file)
+                else:
+                    self.log_output('\t\t： ' + file)
+                index = index + 1
+            self.log_output('  --总计' + str(index) + '个product补丁文件。 ')
+        if self.ufdp_patch_var.get() == 'yes':
+            index = 0
+            for file in self.ufdp_patch_list:
+                if index is 0:
+                    self.log_output('ufdp补丁文件\t\t： ' + file)
+                else:
+                    self.log_output('\t\t： ' + file)
+                index = index + 1
+            self.log_output('  --总计' + str(index) + '个ufdp补丁文件。 ')
+        if self.sdk_patch_var.get() == 'yes':
+            index = 0
+            for file in self.sdk_patch_list:
+                if index is 0:
+                    self.log_output('sdk补丁文件\t\t： ' + file)
+                else:
+                    self.log_output('\t\t： ' + file)
+                index = index + 1
+            self.log_output('  --总计' + str(index) + '个sdk补丁文件。 ')
+        if self.micro_patch_var.get() == 'yes':
+            index = 0
+            for file in self.micro_patch_list:
+                if index is 0:
+                    self.log_output('微码补丁文件\t\t： ' + file)
+                else:
+                    self.log_output('\t\t： ' + file)
+                index = index + 1
+            self.log_output('  --总计' + str(index) + '个微码补丁文件。 ')
+        self.log_output('本地代码目录\t\t： ' + self.local_code_directory_var.get())
+        self.log_output('补丁输出目录\t\t： ' + self.patch_out_path_var.get())
+        self.log_output('计算云账号\t\t： ' + self.cloud_user)
+        self.log_output('计算云密码\t\t： ********' + self.cloud_password)
+        self.log_output('计算云IP\t\t： ' + self.cloud_ip)
+        self.log_output('计算云代码目录\t\t： ' + self.cloud_code_directory)
+        self.log_output('补丁输出路径\t\t： ' + self.patch_out_path_var.get())
+        self.log_output('是否下载vos\t\t： ' + self.download_vos_var.get())
+        if self.download_vos_var.get() == 'yes':
+            self.log_output('W3账号\t\t： ' + self.w3_user)
+            self.log_output('W3密码\t\t： ********' + self.w3_password)
+        self.log_output('')
+        self.log_output('')
+
+    def check_parameter(self):
+        try:
+            if self.check_directory(path=self.local_code_directory_var.get(), file_type='dir') is False:
+                self.log_output('错误： 本地代码路径“' + self.local_code_directory_var.get() + '”不存在。')
+                return False
+            if self.check_directory(path=self.patch_out_path_var.get(), file_type='dir') is False:
+                self.log_output('错误： 补丁输出路径“' + self.patch_out_path_var.get() + '”不存在。')
+                return False
+            self.object_num = 0
+            if self.product_patch_var.get() == 'yes':
+                for file in self.product_patch_list:
+                    print('product patch file: %s' % file)
+                    self.object_num = self.object_num + 1
+                    if self.check_directory(path=file, file_type='file') is False:
+                        self.log_output('错误： 本地补丁文件“' + file + '”不存在！')
+                        return False
+            if self.ufdp_patch_var.get() == 'yes':
+                for file in self.ufdp_patch_list:
+                    print('ufdp patch file: %s' % file)
+                    self.object_num = self.object_num + 1
+                    if self.check_directory(path=file, file_type='file') is False:
+                        self.log_output('错误： 本地补丁文件“' + file + '”不存在！')
+                        return False
+            if self.sdk_patch_var.get() == 'yes':
+                for file in self.sdk_patch_list:
+                    print('sdk patch file: %s' % file)
+                    self.object_num = self.object_num + 1
+                    if self.check_directory(path=file, file_type='file') is False:
+                        self.log_output('错误： 本地补丁文件“' + file + '”不存在！')
+                        return False
+            if self.micro_patch_var.get() == 'yes':
+                for file in self.micro_patch_list:
+                    print('bin patch file: %s' % file)
+                    self.object_num = self.object_num + 1
+                    if self.check_directory(path=file, file_type='file') is False:
+                        self.log_output('错误： 本地补丁文件“' + file + '”不存在！')
+                        return False
+            compile_ip = re.compile('^((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)$')
+            if compile_ip.match(self.cloud_ip) is None:
+                self.log_output('错误：计算云IP地址非法！')
+                return False
+            return True
+        except Exception as e:
+            self.log_output('检查配置错误： ' + str(e) + '\r\n\r\n' + traceback.format_exc())
+            return False
+
+    def find_parameter(self, final_list):
+        for data_list in final_list:
+            if str(data_list[0]) == self.board_type_var.get():
+                self.object_local_dir = data_list[1]
+                self.product_object_cloud_dir = data_list[2]
+                self.ufdp_object_cloud_dir = data_list[3]
+                self.sdk_object_cloud_dir = data_list[4]
+                self.object_vos_dir = data_list[5]
+                self.ufdp_compile_dir = data_list[6]
+                self.patch_command = data_list[7]
+                return True
+        return False
+
+    def process_local_data(self):
+        return self.find_parameter(self.local_data)
+
+    # TODO
+    def process_csv_data(self):
+        '''
+        找到本次编译对应的：
+        1. object本地存放路径
+        2. vos.o本地存放路径
+        3. 补丁文件计算云存放路径
+        ...
+        '''
+        if self.data_file is None:
+            return False
+        try:
+            data = open(self.data_file, 'r')
+            csv_reader = csv.reader(data)
+            final_list = list(csv_reader)
+            print('final_list:\r\n')
+            print(final_list)
+            res = self.find_parameter(final_list)
+            data.close()
+            return res
+        except Exception:
+            self.log_output('读取项目数据失败，使用本地项目数据。')
+            return False
+
+    def print_downloading(self, interval):
+        try:
+            sleep_cnt = 0
+            while True:
+                self.out_put.insert(END, '.')
+                time.sleep(interval/10)
+        except Exception:
+            return
+
+    # TODO
+    def download_project_data(self):
+        url = 'http://10.134.12.4/1patch_data.csv'
+        url = 'https://www.cnblogs.com/fighter007/p/9351688.html'
+        self.data_file = self.convert_to_win32_path(str(Path.home()) + '\\1patch\\1patch_data.csv')
+        print_thread = None
+        try:
+            self.log_output('正在下载项目数据')
+            print_thread = threading.Thread(target=self.print_downloading, args=(3,))
+            print_thread.start()
+            r = requests.get(url=url, timeout=3)
+            self.stop_thread(print_thread)
+            with open(self.data_file, 'wb') as f:
+                f.write(r.content)
+            self.log_output('下载项目数据成功！\r\n')
+            return True
+        except Exception:
+            if print_thread is not None:
+                self.stop_thread(print_thread)
+            self.log_output('下载项目数据超时，使用本地项目数据。\r\n')
+            return False
+
+    def get_parameter(self):
+        self.patch_version = self.patch_version_entry.get()
+        self.cloud_user = self.cloud_user_entry.get()
+        self.cloud_password = self.cloud_password_entry.get()
+        self.cloud_ip = self.cloud_ip_entry.get()
+        self.cloud_code_directory = self.cloud_path_entry.get()
+        self.w3_user = self.w3_user_entry.get()
+        self.w3_password = self.w3_password_entry.get()
+
+    # TODO
+    def get_bat_command(self):
+        return self.convert_to_win32_path(self.local_code_directory_var.get()) + '\make.bat ' + str(self.object_num)
+
+    # TODO
+    def get_vos_file(self):
+        return 'vos_np.o'
+
+    def stop_work(self):
+        print('stop work!')
+        self.stop_process = True
+        self.log_output('====================================================================='
+                        '==========================')
+        self.log_output('已停止制作补丁！')
+        self.start_button['state'] = 'normal'
+        self.stop_button['state'] = 'disable'
+
+    def finish_work(self):
+        print('finish work, will save config')
+        self.save_config()
+        self.log_output('====================================================================='
+                        '==========================')
+        self.log_output('补丁制作完成。')
+        self.start_open_dir['state'] = 'normal'
+        self.start_button['state'] = 'normal'
+        self.stop_button['state'] = 'disable'
+
+    # 基础函数
+    @staticmethod
+    def cut(editor):
+        editor.event_generate('<<Cut>>')
+
+    @staticmethod
+    def copy(editor):
+        editor.event_generate('<<Copy>>')
+
+    @staticmethod
+    def paste(editor):
+        editor.event_generate('<<Paste>>')
+
+    def right_key(self, event, editor):
+        self.menu_bar.delete(0, END)
+        self.menu_bar.add_command(label='剪切', command=lambda: self.cut(editor))
+        self.menu_bar.add_command(label='复制', command=lambda: self.copy(editor))
+        self.menu_bar.add_command(label='粘贴', command=lambda: self.paste(editor))
+        self.menu_bar.post(event.x_root, event.y_root)
+
+    @staticmethod
+    def select_browser(path_var, type):
+        if type == 'dir':
+            path_ = askdirectory()
+            if path_ != '':
+                path_var.set(path_)
+        else:
+            if type == 'source':
+                files_tuple = askopenfilenames(filetypes=[('c source', '.c')])
+            else:
+                files_tuple = askopenfilenames(filetypes=[('bin', '.bin')])
+            if files_tuple:
+                file_list = list(files_tuple)
+                temp_path = path_var.get()
+                for file in file_list:
+                    temp_path = file + ';' + temp_path
+                path_var.set(temp_path)
+
+    def log_output(self, string):
+        self.out_put.insert(END, '\r\n'+string)
+        self.out_put.see(END)
+
+    def log_reset(self):
+        self.out_put.delete('1.0', 'end')
+
+    def select_local_code_directory(self):
+        self.select_browser(path_var=self.local_code_directory_var, type='dir')
+
+    def select_product_patch_file(self):
+        self.select_browser(path_var=self.local_product_patch_file_var, type='source')
+
+    def select_ufdp_patch_file(self):
+        self.select_browser(path_var=self.local_ufdp_patch_file_var, type='source')
+
+    def select_sdk_patch_file(self):
+        self.select_browser(path_var=self.local_sdk_patch_file_var, type='source')
+
+    def select_micro_patch_file(self):
+        self.select_browser(path_var=self.local_micro_patch_file_var, type='bin')
+
+    def select_patch_out_path(self):
+        self.select_browser(path_var=self.patch_out_path_var, type='dir')
+
+    def on_click_vos_download_radio(self):
+        if self.download_vos_var.get() == 'no':
+            self.w3_user_entry['state'] = 'disable'
+            self.w3_password_entry['state'] = 'disable'
+        else:
+            self.w3_user_entry['state'] = 'normal'
+            self.w3_password_entry['state'] = 'normal'
+
+    def set_product_button_status(self):
+        if self.product_patch_var.get() == 'yes':
+            self.local_product_file_entry['state'] = 'normal'
+            self.local_product_file_select['state'] = 'normal'
+            self.local_product_file_reset['state'] = 'normal'
+        else:
+            self.local_product_file_entry['state'] = 'disable'
+            self.local_product_file_select['state'] = 'disable'
+            self.local_product_file_reset['state'] = 'disable'
+
+    def set_ufdp_button_status(self):
+        if self.ufdp_patch_var.get() == 'yes':
+            self.local_ufdp_file_entry['state'] = 'normal'
+            self.local_ufdp_file_select['state'] = 'normal'
+            self.local_ufdp_file_reset['state'] = 'normal'
+        else:
+            self.local_ufdp_file_entry['state'] = 'disable'
+            self.local_ufdp_file_select['state'] = 'disable'
+            self.local_ufdp_file_reset['state'] = 'disable'
+
+    def set_sdk_button_status(self):
+        if self.sdk_patch_var.get() == 'yes':
+            self.local_sdk_file_entry['state'] = 'normal'
+            self.local_sdk_file_select['state'] = 'normal'
+            self.local_sdk_file_reset['state'] = 'normal'
+        else:
+            self.local_sdk_file_entry['state'] = 'disable'
+            self.local_sdk_file_select['state'] = 'disable'
+            self.local_sdk_file_reset['state'] = 'disable'
+
+    def set_micro_button_status(self):
+        if self.micro_patch_var.get() == 'yes':
+            print('set micro button to normal')
+            self.local_micro_file_entry['state'] = 'normal'
+            self.local_micro_file_select['state'] = 'normal'
+            self.local_micro_file_reset['state'] = 'normal'
+        else:
+            print('set micro button to disable')
+            self.local_micro_file_entry['state'] = 'disable'
+            self.local_micro_file_select['state'] = 'disable'
+            self.local_micro_file_reset['state'] = 'disable'
+
+    @staticmethod
+    def set_path_attri(state, entry, select, reset):
+        if state == 'no':
+            entry['state'] = 'disable'
+            select['state'] = 'disable'
+            reset['state'] = 'disable'
+
+    def generate_path_button(self, label_text, entry_default_value, command, x, y):
+        Label(self.window, text=label_text,font=('宋体', self.font_size)).place(x=x, y=y)
+        entry = Entry(self.window, width=38, font=('宋体', self.font_size), textvariable=entry_default_value)
+        entry.place(x=x+140, y=y)
+        entry.bind('<Button-3>', lambda x1: self.right_key(x1, entry))
+        select = Button(self.window, text='选择', command=command)
+        select.place(x=x+455, y=y-10)
+        reset = Button(self.window, text='重置', command=lambda: entry_default_value.set(''))
+        reset.place(x=x+498, y=y-10)
+        return entry, select, reset
+
+    def generate_button(self, button_text, command, x1, y1):
+        button = Button(self.window, text=button_text, command=command, font=('宋体', self.font_size))
+        button.place(x=x1, y=y1)
+        return button
+
+    def generate_label(self, label_text, x1, y1):
+        Label(self.window, text=label_text, font=('宋体', self.font_size)).place(x=x1, y=y1)
+
+    def generate_radio_button(self, label_text, radio_text1, radio_text2, radio_variable,
+                              radio_value1, radio_value2, command, x, y):
+        Label(self.window, text=label_text, font=('宋体', self.font_size)).place(x=x, y=y)
+        r1 = Radiobutton(self.window, text=radio_text1, variable=radio_variable, value=radio_value1, command=command, font=('宋体', self.font_size))
+        r1.place(x=x+140, y=y)
+        r2 = Radiobutton(self.window, text=radio_text2, variable=radio_variable, value=radio_value2, command=command, font=('宋体', self.font_size))
+        r2.place(x=x+220, y=y)
+        return r1, r2
+
+    def generate_check_button(self, label_text, radio_text1, radio_text2, radio_text3, radio_text4, radio_variable1,
+                              radio_variable2, radio_variable3, radio_variable4, command1, command2, command3, command4, x, y):
+        Label(self.window, text=label_text, font=('宋体', self.font_size)).place(x=x, y=y)
+        c1 = Checkbutton(self.window, text=radio_text1, variable=radio_variable1, onvalue='yes', offvalue='no',
+                         command=command1, font=('宋体', self.font_size))
+        c1.place(x=x+140, y=y)
+        c2 = Checkbutton(self.window, text=radio_text2, variable=radio_variable2, onvalue='yes', offvalue='no',
+                         command=command2, font=('宋体', self.font_size))
+        c2.place(x=x+245, y=y)
+        c3 = Checkbutton(self.window, text=radio_text3, variable=radio_variable3, onvalue='yes', offvalue='no',
+                         command=command3, font=('宋体', self.font_size))
+        c3.place(x=x+320, y=y)
+        c4 = Checkbutton(self.window, text=radio_text4, variable=radio_variable4, onvalue='yes', offvalue='no',
+                         command=command4, font=('宋体', self.font_size))
+        c4.place(x=x + 390, y=y)
+        return c1, c2, c3, c4
+
+    def generate_text_button(self, label_text, entry_default_value, show_type, x, y):
+        Label(self.window, text=label_text, font=('宋体', self.font_size)).place(x=x, y=y)
+        entry = Entry(self.window, show=show_type, width=30, font=('宋体', self.font_size))
+        entry.place(x=x+140, y=y)
+        entry.insert(0, entry_default_value)
+        entry.bind('<Button-3>', lambda x1: self.right_key(x1, entry))
+        return entry
+
+    @staticmethod
+    def check_directory(path, file_type):
+        if file_type is 'dir':
+            if Path(path).is_dir() is False:
+                return False
+        elif file_type is 'file':
+            if Path(path).is_file() is False:
+                return False
+        return True
+
+    @staticmethod
+    def convert_to_win32_path(path: str) -> str:
+        return path.replace(r'\/'.replace(os.sep, ''), os.sep)
+
+    def open_dir(self):
+        try:
+            start_dir = self.convert_to_win32_path(path=self.patch_out_path_var.get())
+            os.system("explorer.exe %s" % start_dir)
+        except Exception as e:
+            self.log_output('打开补丁目录异常： ' + str(e))
+
+    @staticmethod
+    def _async_raise(tid, exception_type):  # 向指定线程抛出异常
+        tid = ctypes.c_long(tid)
+        if not inspect.isclass(exception_type):
+            exception_type = type(exception_type)
+        res = ctypes.pythonapi.PyThreadState_SetAsyncExc(tid, ctypes.py_object(exception_type))
+        if res == 0:
+            raise ValueError("提示：编译线程已停止运行。")
+        elif res != 1:
+            # """if it returns a number greater than one, you're in trouble,
+            # and you should call it again with exc=NULL to revert the effect"""
+            ctypes.pythonapi.PyThreadState_SetAsyncExc(tid, None)
+            raise SystemError("停止线程失败，请重新打开1patch。")
+
+    def stop_thread(self, thread):
+        self._async_raise(tid=thread.ident, exception_type=SystemExit)
+
+    def start_app(self):
+        self.window.mainloop()
+
+
+my_window = MainWindow()
+my_window.start_app()
