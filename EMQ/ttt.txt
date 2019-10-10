@@ -25,28 +25,31 @@ import csv
 
 class ObjectGenerator:
     def __init__(self,
-                 ip,
-                 port,
-                 user,
-                 password,
-                 cloud_code_dir,
-                 local_code_dir,
-                 product,
-                 ufdp,
-                 sdk,
-                 dev_type,
-                 product_file_list,
-                 ufdp_file_list,
-                 sdk_file_list,
-                 log_func,
-                 object_local_dir,
-                 product_object_cloud_dir,
-                 ufdp_object_cloud_dir,
-                 sdk_object_cloud_dir,
-                 object_vos_dir,
-                 product_compile_command,
-                 ufdp_compile_dir,
-                 patch_command):
+                 ip,                        # 计算云IP
+                 port,                      # 计算云端口
+                 user,                      # 计算云用户名
+                 password,                  # 计算云密码
+                 cloud_code_dir,            # 计算云代码目录
+                 local_code_dir,            # 本地代码目录
+                 product,                   # 是否编译product文件
+                 ufdp,                      # 是否编译ufdp文件
+                 sdk,                       # 是否编译sdk文件
+                 micro,                     # 是否编译微码
+                 dev_type,                  # 设备类型（盒子/框子）
+                 product_file_list,         # product文件列表
+                 ufdp_file_list,            # ufdp补丁文件列表
+                 sdk_file_list,             # sdk补丁文件列表
+                 micro_file_list,           # 微码bin文件列表
+                 log_func,                  # 日志函数
+                 object_local_dir,          # .o本地存放目录
+                 micro_object_local_dir,    # 微码bin本地存放目录
+                 product_object_cloud_dir,  # product .o计算云存放目录
+                 ufdp_object_cloud_dir,     # ufdp .o计算云存放目录，对于vx系统，此目录同本地
+                 sdk_object_cloud_dir,      # sdk .o计算云存放目录
+                 product_compile_command,   # product编译命令(可能是计算云shell，也可能是本地bat)
+                 ufdp_compile_dir,          # ufdp编译目录(可能是计算云code/ufdp/project/xxx也可能是本地code/ufdp/project/xxx
+                 ufdp_compile_command,      # 编译命令
+                 os):                       # vxworks / linux
         self.ip = ip
         self.port = port
         self.user = user
@@ -56,6 +59,7 @@ class ObjectGenerator:
         self.product = product
         self.ufdp = ufdp
         self.sdk = sdk
+        self.micro = micro
         self.dev_type = dev_type
         self.ssh = SSHClient()
         self.know_host = AutoAddPolicy()
@@ -63,15 +67,17 @@ class ObjectGenerator:
         self.product_patch_file_list = product_file_list
         self.ufdp_patch_file_list = ufdp_file_list
         self.sdk_patch_file_list = sdk_file_list
+        self.micro_patch_file_list = micro_file_list
         self.log_func = log_func
         self.object_local_dir = object_local_dir,
+        self.micro_object_local_dir = micro_object_local_dir,
         self.product_object_cloud_dir = product_object_cloud_dir,
         self.ufdp_object_cloud_dir = ufdp_object_cloud_dir,
         self.sdk_object_cloud_dir = sdk_object_cloud_dir,
-        self.object_vos_dir = object_vos_dir,
         self.product_compile_command = product_compile_command,
         self.ufdp_compile_dir = ufdp_compile_dir,
-        self.patch_command = patch_command
+        self.ufdp_compile_command = ufdp_compile_command
+        self.os = os
         self.shell = None
         self.trans = None
         self.sftp = None
@@ -133,23 +139,25 @@ class ObjectGenerator:
                     print("set_prodct_env() return: " + str(res))
                     self.log_func('设置环境变量失败！')
                     return res
-                res = self.make_product(self.product_patch_file_list)
+                res = self.make_product(file_list=self.product_patch_file_list, os=self.os)
                 if res < 0:
                     print("make_product() return: " + str(res))
                     self.log_func('编译product object失败！')
                     return res
             if self.ufdp == 'yes':
-                res = self.make_ufdp_and_sdk(patch_type='ufdp', file_list=self.ufdp_patch_file_list)
+                res = self.make_ufdp_and_sdk(patch_type='ufdp', file_list=self.ufdp_patch_file_list, os=self.os)
                 if res < 0:
                     print("make_ufdp_and_sdk(ufdp) return: " + str(res))
                     self.log_func('编译ufdp object失败！')
                     return res
             if self.sdk == 'yes':
-                res = self.make_ufdp_and_sdk(patch_type='sdk', file_list=self.sdk_patch_file_list)
+                res = self.make_ufdp_and_sdk(patch_type='sdk', file_list=self.sdk_patch_file_list, os=self.os)
                 if res < 0:
                     print("make_ufdp_and_sdk(sdk) return: " + str(res))
                     self.log_func('编译sdk object失败！')
                     return res
+            if self.micro == 'yes':
+                res = self.make_micro(self.micro_patch_file_list)
             return res
         except SystemExit:
             self.close_io()
@@ -183,7 +191,7 @@ class ObjectGenerator:
         p = Path(file)
         file_name = p.name
         if source is False:
-            file_name = p.stem + '.c'
+            file_name = p.stem + '.o'
         if patch_type == 'product':
             return self.cloud_code_dir + '/' + file_name
         elif patch_type == 'ufdp':
@@ -192,70 +200,136 @@ class ObjectGenerator:
             return self.cloud_code_dir + '/' + file_name
 
     # TODO
-    def get_local_patch_path(self, file):
+    def get_local_patch_store_path(self, file):
         p = Path(file)
         return self.local_code_dir + '/' + p.stem + '.c'
+
+    # TODO
+    def get_local_patch_path(self, patch_type, file, source):
+        # 获取ufdp和sdk补丁本地编译存放目录
+        p = Path(file)
+        file_name = p.name
+        if source is False:
+            file_name = p.stem + '.o'
+        if patch_type == 'product':
+            return self.convert_to_win32_path(self.local_code_dir + '\\' + self.product_object_cloud_dir + '\\' + file_name)
+        elif patch_type == 'ufdp':
+            return self.convert_to_win32_path(self.local_code_dir + '\\' + self.ufdp_object_cloud_dir + '\\' + file_name)
+        elif patch_type == 'sdk':
+            return self.convert_to_win32_path(self.local_code_dir + '\\' + self.sdk_object_cloud_dir + '\\' + file_name)
 
     @staticmethod
     def convert_to_win32_path(path: str) -> str:
         return path.replace(r'\/'.replace(os.sep, ''), os.sep)
 
     # TODO
-    def make_product(self, file_list):
+    def make_product(self, file_list, os):
         print('enter product function maker')
-        # 上传补丁文件
-        for file in file_list:
-            cloud_product_patch_file = self.get_cloud_patch_path(source=True, patch_type='product', file=file)
-            self.log_func('\r\nput:\t%s\r\nto:\t%s:%s' % (file, self.ip, cloud_product_patch_file))
-            self.sftp.put(file, cloud_product_patch_file)
-            self.log_func('\r\n补丁文件 %s 上传成功！' % Path(file).name)
-        self.log_func('\r\n')
-        # 执行编译脚本
-        # self.shell.send('cd ' + self.cloud_code_dir + ' && make patchobj.clean && make patchobj.build\n')
-        # result = self.recv_until(self.make_str_product_ok)
-        for file in file_list:
-            cloud_product_patch_object = self.get_cloud_patch_path(source=False, patch_type='product', file=file)
-            local_patch_object = self.get_local_patch_path(file)
-            # 通过查看.o是否生成，判断编译是否成功
-            result = self.try_execute_command(command='ls ' + cloud_product_patch_object)
-            if result < 0:
-                self.log_func('错误：补丁文件 %s 编译失败，请检查编译日志！' % Path(file).name)
-                return -1
-            self.log_func('\r\n补丁文件 %s 编译成功！' % Path(file).name)
-            # 下载.o文件
-            self.log_func('\r\nget:\t%s:%s\r\nto:\t%s' % (self.ip, cloud_product_patch_object, local_patch_object))
-            self.sftp.get(cloud_product_patch_object, local_patch_object)
-            self.log_func('\r\n补丁文件 %s.o 下载成功！' % Path(file).stem)
-        self.log_func('\r\n')
+        if os == 'linux':
+            # 上传补丁文件
+            for file in file_list:
+                cloud_product_patch_file = self.get_cloud_patch_path(source=True, patch_type='product', file=file)
+                self.log_func('\r\nput:\t%s\r\nto:\t%s:%s' % (file, self.ip, cloud_product_patch_file))
+                self.sftp.put(file, cloud_product_patch_file)
+                self.log_func('\r\n补丁文件 %s 上传成功！' % Path(file).name)
+            self.log_func('\r\n')
+            # 执行编译脚本
+            # self.shell.send('cd ' + self.cloud_code_dir + ' && make patchobj.clean && make patchobj.build\n')
+            # result = self.recv_until(self.make_str_product_ok)
+            for file in file_list:
+                cloud_product_patch_object = self.get_cloud_patch_path(source=False, patch_type='product', file=file)
+                local_patch_object = self.get_local_patch_store_path(file)
+                # 通过查看.o是否生成，判断编译是否成功
+                result = self.try_execute_command(command='ls ' + cloud_product_patch_object)
+                if result < 0:
+                    self.log_func('错误：补丁文件 %s 编译失败，请检查编译日志！' % Path(file).name)
+                    return -1
+                self.log_func('\r\n补丁文件 %s 编译成功！' % Path(file).name)
+                # 下载.o文件
+                self.log_func('\r\nget:\t%s:%s\r\nto:\t%s' % (self.ip, cloud_product_patch_object, local_patch_object))
+                self.sftp.get(cloud_product_patch_object, local_patch_object)
+                self.log_func('\r\n补丁文件 %s.o 下载成功！' % Path(file).stem)
+            self.log_func('\r\n')
+        else:
+            for file in file_list:
+                # 拷贝object到本地.o存放目录
+                local_patch_object = self.convert_to_win32_path(self.get_local_patch_store_path(file))
+                copy_cmd = 'copy /y ' + file + ' ' + self.local_code_dir + '\\' + local_patch_object
+                result = os.popen(copy_cmd)
+                self.log_func(result.read().format())
+                if Path(local_patch_object).is_file() is False:
+                    self.log_func('product补丁源文件 %s 拷贝失败！' % file)
+                    return -1
         return 0
 
     # TODO
-    def make_ufdp_and_sdk(self, patch_type, file_list):
+    def make_ufdp_and_sdk(self, patch_type, file_list, os):
         print('enter %s function maker' % patch_type)
+        if os == 'linux':
+            for file in file_list:
+                cloud_ufdp_patch_file = self.get_cloud_patch_path(source=True, patch_type=patch_type, file=file)
+                self.log_func('\r\nput:\t%s\r\nto:\t%s:%s' % (file, self.ip, cloud_ufdp_patch_file))
+                self.sftp.put(file, cloud_ufdp_patch_file)
+                self.log_func('\r\n补丁文件 %s 上传成功！' % Path(file).name)
+            self.log_func('\r\n')
+            # 执行编译脚本
+            # self.shell.send('cd ' + self.cloud_code_dir + '/code/ufdp/project/patch' + '\n')
+            # self.shell.send('./auto_clean_patch.sh && ./auto_make_patch.sh\n')
+            # result = self.recv_until(self.make_str_ufdp_sdk_ok)
+            for file in file_list:
+                cloud_ufdp_patch_object = self.get_cloud_patch_path(source=False, patch_type=patch_type, file=file)
+                local_patch_object = self.get_local_patch_store_path(file)
+                # 通过查看.o是否生成，判断编译是否成功
+                result = self.try_execute_command(command='ls ' + cloud_ufdp_patch_object)
+                if result < 0:
+                    self.log_func('错误：补丁文件 %s 编译失败，请检查编译日志！' % Path(file).name)
+                    return -1
+                self.log_func('补丁文件 %s 编译成功！' % Path(file).name)
+                # 下载.o文件
+                self.log_func('\r\nget:\t%s:%s\r\nto:\t%s' % (self.ip, cloud_ufdp_patch_object, local_patch_object))
+                self.sftp.get(cloud_ufdp_patch_object, local_patch_object)
+                if Path(local_patch_object).is_file() is False:
+                    self.log_func('%s补丁.o %s 下载失败！' % (patch_type, file))
+                    return -1
+                self.log_func('\r\n补丁文件 %s.o 下载成功！' % Path(file).stem)
+            self.log_func('\r\n')
+        else:
+            for file in file_list:
+                local_file = self.get_local_patch_path(patch_type=patch_type, file=file, source=True)
+                copy_cmd = 'copy /y ' + self.convert_to_win32_path(file) + ' ' + local_file
+                result = os.popen(copy_cmd)
+                self.log_func(result.read().format())
+                if Path(local_file).is_file() is False:
+                    self.log_func('%s补丁文件%s 拷贝失败！' % (patch_type, file))
+                    return -1
+                # 执行编译命令
+                compile_cmd = self.convert_to_win32_path(self.local_code_dir + '\\' + self.ufdp_compile_command)
+                result = os.popen(copy_cmd)
+                self.log_func(result.read().format())
+                local_object = self.get_local_patch_path(patch_type=patch_type, file=file, source=False)
+                if Path(local_object).is_file() is False:
+                    self.log_func('%s补丁文件%s 编译失败，请检查编译日志！' % (patch_type, file))
+                    return -1
+                # 拷贝object到本地.o存放目录
+                local_patch_object = self.convert_to_win32_path(self.get_local_patch_store_path(file))
+                copy_cmd = 'copy /y ' + local_object + ' ' + self.local_code_dir + '\\' + local_patch_object
+                result = os.popen(copy_cmd)
+                self.log_func(result.read().format())
+                if Path(local_patch_object).is_file() is False:
+                    self.log_func('%s补丁.o %s 拷贝失败！' % (patch_type, file))
+                    return -1
+        return 0
+
+    def make_micro(self, file_list, local_dir):
+        # 只需将微码bin文件拷贝到本地指定目录即可
         for file in file_list:
-            cloud_ufdp_patch_file = self.get_cloud_patch_path(source=True, patch_type=patch_type, file=file)
-            self.log_func('\r\nput:\t%s\r\nto:\t%s:%s' % (file, self.ip, cloud_ufdp_patch_file))
-            self.sftp.put(file, cloud_ufdp_patch_file)
-            self.log_func('\r\n补丁文件 %s 上传成功！' % Path(file).name)
-        self.log_func('\r\n')
-        # 执行编译脚本
-        # self.shell.send('cd ' + self.cloud_code_dir + '/code/ufdp/project/patch' + '\n')
-        # self.shell.send('./auto_clean_patch.sh && ./auto_make_patch.sh\n')
-        # result = self.recv_until(self.make_str_ufdp_sdk_ok)
-        for file in file_list:
-            cloud_ufdp_patch_object = self.get_cloud_patch_path(source=False, patch_type=patch_type, file=file)
-            local_patch_object = self.get_local_patch_path(file)
-            # 通过查看.o是否生成，判断编译是否成功
-            result = self.try_execute_command(command='ls ' + cloud_ufdp_patch_object)
-            if result < 0:
-                self.log_func('错误：补丁文件 %s 编译失败，请检查编译日志！' % Path(file).name)
+            copy_cmd = 'copy /y ' + self.convert_to_win32_path(file) + ' ' + self.convert_to_win32_path(local_dir)
+            result = os.popen(copy_cmd)
+            self.log_func(result.read().format())
+            local_file = self.convert_to_win32_path(local_dir + '\\' + Path(file).name)
+            if Path(local_file).is_file() is False:
+                self.log_func('%s 拷贝失败！' % file)
                 return -1
-            self.log_func('补丁文件 %s 编译成功！' % Path(file).name)
-            # 下载.o文件
-            self.log_func('\r\nget:\t%s:%s\r\nto:\t%s' % (self.ip, cloud_ufdp_patch_object, local_patch_object))
-            self.sftp.get(cloud_ufdp_patch_object, local_patch_object)
-            self.log_func('\r\n补丁文件 %s.o 下载成功！' % Path(file).stem)
-        self.log_func('\r\n')
         return 0
 
     def set_prduct_env(self):
@@ -295,10 +369,11 @@ class ObjectGenerator:
 
 
 class VosDownloader:
-    def __init__(self, user, password, file, version, print_download_func, stop_thread_func, log_func):
+    def __init__(self, user, password, file, dir, version, print_download_func, stop_thread_func, log_func):
         self.user = user
         self.password = password
         self.file = file
+        self.dir = dir
         self.version = version
         self.print_download_func = print_download_func
         self.stop_thread_func = stop_thread_func
@@ -395,6 +470,7 @@ class MainWindow:
         self.sdk_patch_list = []
         self.object_num = 0
         self.data_file = None
+        self.vos_local_dir = None
         self.object_local_dir = None            # 1
         self.product_object_cloud_dir = None    # 2
         self.ufdp_object_cloud_dir = None       # 3
@@ -403,7 +479,9 @@ class MainWindow:
         self.object_vos_dir = None              # 5
         self.product_compile_command = 'make patchobj.clean && make patchobj.build'
         self.ufdp_compile_dir = None            # 6
-        self.patch_command = None               # 7
+        self.ufdp_compile_command = None               # 7
+        self.micro_object_local_dir = None
+        self.os = None
         self.local_data = \
             [['np', 'code/project/9300/patch/patch_np', 'build/project/9300/patch/np', 'code/ufdp/project/9300np/np/fpi',
               'code/ufdp/project/9300np/np/sdk', 'code/project/9300/patch/patchbase_common', 'code/ufdp/project/9300np', 'code/project/9300/patch/make_patch_all.bat'],
@@ -594,19 +672,22 @@ class MainWindow:
                                        product=self.product_patch_var.get(),
                                        ufdp=self.ufdp_patch_var.get(),
                                        sdk=self.sdk_patch_var.get(),
+                                       micro=self.micro_patch_var.get(),
                                        dev_type=self.board_type_var.get(),
                                        product_file_list=self.product_patch_list,
                                        ufdp_file_list=self.ufdp_patch_list,
                                        sdk_file_list=self.sdk_patch_list,
+                                       micro_file_list=self.micro_patch_list,
                                        log_func=self.log_output,
                                        object_local_dir=self.object_local_dir,
+                                       micro_object_local_dir=self.micro_object_local_dir,
                                        product_object_cloud_dir=self.product_object_cloud_dir,
                                        ufdp_object_cloud_dir=self.ufdp_object_cloud_dir,
                                        sdk_object_cloud_dir=self.sdk_object_cloud_dir,
-                                       object_vos_dir=self.object_vos_dir,
                                        product_compile_command=self.product_compile_command,
                                        ufdp_compile_dir=self.ufdp_compile_dir,
-                                       patch_command=self.patch_command)
+                                       ufdp_compile_command=self.ufdp_compile_command,
+                                       os=self.os)
 
         try:
             # 测试计算云连接情况
@@ -628,6 +709,7 @@ class MainWindow:
                 vos_downloader = VosDownloader(user=self.w3_user,
                                                password=self.w3_password,
                                                file=vos_file,
+                                               dir=self.vos_local_dir,
                                                version=self.patch_version,
                                                print_download_func=self.print_downloading,
                                                stop_thread_func=self.stop_thread,
@@ -901,7 +983,7 @@ class MainWindow:
                 self.sdk_object_cloud_dir = data_list[4]
                 self.object_vos_dir = data_list[5]
                 self.ufdp_compile_dir = data_list[6]
-                self.patch_command = data_list[7]
+                self.ufdp_compile_command = data_list[7]
                 return True
         return False
 
@@ -934,7 +1016,6 @@ class MainWindow:
 
     def print_downloading(self, interval):
         try:
-            sleep_cnt = 0
             while True:
                 self.out_put.insert(END, '.')
                 time.sleep(interval/10)
@@ -1012,11 +1093,21 @@ class MainWindow:
     def paste(editor):
         editor.event_generate('<<Paste>>')
 
+    @staticmethod
+    def redo(editor):
+        editor.event_generate('<<Redo>>')
+
+    @staticmethod
+    def undo(editor):
+        editor.event_generate('<<Undo>>')
+
     def right_key(self, event, editor):
         self.menu_bar.delete(0, END)
         self.menu_bar.add_command(label='剪切', command=lambda: self.cut(editor))
         self.menu_bar.add_command(label='复制', command=lambda: self.copy(editor))
         self.menu_bar.add_command(label='粘贴', command=lambda: self.paste(editor))
+        self.menu_bar.add_command(label='撤销', command=lambda: self.undo(editor))
+        self.menu_bar.add_command(label='恢复', command=lambda: self.redo(editor))
         self.menu_bar.post(event.x_root, event.y_root)
 
     @staticmethod
